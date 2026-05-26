@@ -1,0 +1,10 @@
+# Parity-harness fixture catalog. Mirrors the structure (and the genuine
+# defects) of the live ~/.tether/catalog/ so the S4.5 parity test runs
+# deterministically on a CI runner that has no Tether install.
+version: 0.1.0
+catalog:
+  roots:
+    projects: projects
+    agents: agents
+    providers: providers
+    launches: launches

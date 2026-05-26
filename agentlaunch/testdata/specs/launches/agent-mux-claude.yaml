@@ -1,0 +1,11 @@
+# Reproduces legacy launches/agent-mux-claude.yaml. Provider cross-product
+# sample 1/5 — same project, claude-code runner.
+spec: tether.launch
+name: agent-mux-claude
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/agent-mux
+  runner: claude-code
+  isolation: hybrid
+  project: agent-mux
+  agent_role: backend
+  display_name: "Agent Mux — Engineer"

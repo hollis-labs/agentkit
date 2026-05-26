@@ -1,0 +1,5 @@
+id: codex-app-server
+type: cli
+command: /usr/local/bin/codex
+bootstrap:
+  mode: jsonrpc-stdio

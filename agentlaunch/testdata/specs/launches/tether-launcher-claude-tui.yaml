@@ -1,0 +1,12 @@
+# Reproduces legacy launches/tether-launcher-claude-tui.yaml — the TUI
+# runner variant (legacy provider: claude-pty). The `-tui` filename
+# suffix is now just the runner input.
+spec: tether.launch
+name: tether-launcher-claude-tui
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/tether-launcher
+  runner: claude-pty
+  isolation: hybrid
+  project: tether-launcher
+  agent_role: frontend
+  display_name: "Tether Launcher — Frontend (TUI)"

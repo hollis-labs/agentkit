@@ -1,0 +1,11 @@
+# Reproduces legacy launches/nanite-claude-stream.yaml + folds
+# boot-profiles/nanite.backend.main.yaml. Streaming runner, hybrid.
+spec: tether.launch
+name: nanite-claude-stream
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/nanite
+  runner: claude-stream      # common-setup template: claude-stream
+  isolation: hybrid
+  project: nanite
+  agent_role: backend
+  display_name: "Nanite — Backend"

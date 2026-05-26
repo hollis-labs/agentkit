@@ -1,0 +1,5 @@
+id: claude-code
+type: cli
+command: /usr/local/bin/claude
+bootstrap:
+  mode: streaming-stdio

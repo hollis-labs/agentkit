@@ -1,0 +1,5 @@
+id: codex-cli
+type: cli-goprovider
+adapter: codex
+bootstrap:
+  mode: agents_md

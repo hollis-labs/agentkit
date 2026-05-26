@@ -1,0 +1,6 @@
+id: opencode
+type: cli
+command: /usr/local/bin/opencode
+args: [run]
+bootstrap:
+  mode: prepend

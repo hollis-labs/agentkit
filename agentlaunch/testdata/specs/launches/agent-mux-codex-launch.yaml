@@ -1,0 +1,13 @@
+# Reproduces legacy launches/agent-mux-codex-launch.yaml. Provider
+# cross-product sample 2/5 — same project, codex-cli runner. In the
+# legacy catalog this was a SEPARATE launch file purely because the
+# provider differed; per D3 provider is now just the `runner` input.
+spec: tether.launch
+name: agent-mux-codex-launch
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/agent-mux
+  runner: codex-cli
+  isolation: hybrid
+  project: agent-mux
+  agent_role: backend
+  display_name: "Agent Mux — Codex Engineer"

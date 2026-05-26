@@ -1,0 +1,12 @@
+# Reproduces legacy launches/tether-claude-worktree.yaml.
+# The legacy `.worktree` TWIN file is GONE: this is the same launch as
+# tether-claude with isolation flipped to worktree. Mode is an input.
+spec: tether.launch
+name: tether-claude-worktree
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/tether
+  runner: claude-code        # common-setup template: claude-worktree
+  isolation: worktree
+  project: tether
+  agent_role: backend
+  display_name: "Tether — Backend Worktree"

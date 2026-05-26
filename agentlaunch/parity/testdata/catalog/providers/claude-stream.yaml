@@ -1,0 +1,5 @@
+id: claude-stream
+type: cli
+command: /usr/local/bin/claude
+bootstrap:
+  mode: stdin

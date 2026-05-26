@@ -1,0 +1,46 @@
+# Self-contained inline-form catalog used by translator tests.
+# Mirrors the Tether per-entry YAML shape, but inlined under
+# GlobalCatalog.{projects,agents,providers,launches} so the translator
+# can exercise resolution without a directory walk.
+version: 0.1.0
+projects:
+  - id: demo
+    name: Demo Project
+    repo_root: /tmp/demo-repo
+    tracking_root: /tmp/demo-tracking
+    boot_fragments:
+      - boot/common.md
+    workspace:
+      default_mode: hybrid
+      session_root: /tmp/demo-sessions
+agents:
+  - id: demo-agent
+    name: Demo Agent
+    roles: [general]
+    permissions:
+      network: true
+providers:
+  - id: codex-cli
+    type: cli-goprovider
+    provider: codex
+    runtime_kind: subprocess
+    adapter: codex
+    bootstrap:
+      mode: agents_md
+    env:
+      mode: merge
+      redact:
+        - ANTHROPIC_API_KEY
+launches:
+  - id: codex-launch
+    project: demo
+    agent: demo-agent
+    provider: codex-cli
+    workspace:
+      mode: hybrid
+    prompt:
+      include_project_boot: true
+      include_agent_boot: true
+defaults_block:
+  labels:
+    portfolio: hollis-labs

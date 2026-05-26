@@ -1,0 +1,13 @@
+# Reproduces legacy launches/agent-mux-claude-stream-worktree.yaml.
+# Provider cross-product sample 5/5 — claude-stream runner, AND the
+# worktree-mode axis. One bag covers both axes that were two filename
+# dimensions in the legacy catalog.
+spec: tether.launch
+name: agent-mux-claude-stream-worktree
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/agent-mux
+  runner: claude-stream
+  isolation: worktree
+  project: agent-mux
+  agent_role: backend
+  display_name: "Agent Mux — Engineer Worktree"

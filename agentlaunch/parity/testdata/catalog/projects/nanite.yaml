@@ -1,0 +1,5 @@
+id: nanite
+name: Nanite
+repo_root: ~/dev/hollis-labs/apps/nanite
+workspace:
+  default_mode: hybrid

@@ -1,0 +1,55 @@
+folio_version: "0.1"
+generated_at: 2026-05-25T20:28:25.651376-05:00
+generator: folio/0.1.0
+presets:
+  - id: go-lib
+    version: 0.1.0
+    source: bundled
+    resolved_path: bundled:presets/go-lib
+inputs:
+  copyright_holder: Hollis Labs
+  description: Unified Go agent runtime toolkit
+  github_owner: hollis-labs
+  go_version: 1.26.1
+  package_name: agentkit
+  repo_name: agentkit
+computed:
+  module_path: github.com/hollis-labs/agentkit
+  year: "2026"
+files:
+  .github/workflows/check.yml:
+    preset: go-lib
+    digest_at_gen: sha256:aac94411d0d8efc16c742a9dd048689ede1c8b84c8d6984a5d80fea09fb295d5
+  .gitignore:
+    preset: go-lib
+    digest_at_gen: sha256:1abae72d1b570e1dca6465bad43ba51f8a19bf92dd09eb9e6692d2b143282b4a
+  CHANGELOG.md:
+    preset: go-lib
+    digest_at_gen: sha256:3c1d6117bcdcb962a40afebd74e092cabddfb14313c3b2a004df6e48dab6ebd3
+  LICENSE:
+    preset: go-lib
+    digest_at_gen: sha256:29fde794587339581b8d68aa7753337b321da45cbe49cf5a0be907db7e67e7d8
+  README.md:
+    preset: go-lib
+    digest_at_gen: sha256:5cfbd93fc6696ffdacd1bce7484a437961fd34ee5282d9ff19444be2bcdf1774
+  agentkit/agentkit.go:
+    preset: go-lib
+    digest_at_gen: sha256:153a63014797b5c329f96c36f9e222e06a72cfc3c15f955da5918886ec08f63b
+  agentkit/agentkit_test.go:
+    preset: go-lib
+    digest_at_gen: sha256:6d0216e00dd1059838cf84d6494144e0b4a8df46e3b763e9a787e72a42639330
+  agentkit/doc.go:
+    preset: go-lib
+    digest_at_gen: sha256:6c2fb1829e61182bef0e2a1a6b5682e99686ac2cfb1ab4b311da8b1d99b8ca68
+  examples/README.md:
+    preset: go-lib
+    digest_at_gen: sha256:53c2623eb82305c8a0255b28f10a7c168f6c27175606a42145b5684425fead12
+  go.mod:
+    preset: go-lib
+    digest_at_gen: sha256:3d34c8a5b4b81bbeb46f729bad73b7bdbb5f7bcf04a79b1acd0076dab464ac75
+sync_history:
+  - at: 2026-05-25T20:28:25.651376-05:00
+    operation: init
+    presets:
+      - id: go-lib
+        version: 0.1.0

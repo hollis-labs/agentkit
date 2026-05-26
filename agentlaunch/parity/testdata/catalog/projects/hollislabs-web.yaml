@@ -1,0 +1,5 @@
+id: hollislabs-web
+name: hollislabs.com
+repo_root: ~/dev/hollis-labs/sites/hollis-labs.com
+workspace:
+  default_mode: hybrid

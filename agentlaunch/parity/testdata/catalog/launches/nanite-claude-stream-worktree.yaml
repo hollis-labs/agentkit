@@ -1,0 +1,9 @@
+id: nanite-claude-stream-worktree
+project: nanite
+agent: general
+provider: claude-stream
+workspace:
+  mode: worktree
+prompt:
+  include_project_boot: true
+  include_agent_boot: true

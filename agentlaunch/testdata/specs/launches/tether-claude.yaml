@@ -1,0 +1,11 @@
+# Reproduces legacy launches/tether-claude.yaml (claude-code, hybrid).
+# Legacy: id/project/agent=general/provider=claude-code/workspace.mode=hybrid.
+spec: tether.launch
+name: tether-claude
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/tether
+  runner: claude-code        # common-setup template: claude-shared
+  isolation: hybrid
+  project: tether
+  agent_role: backend
+  display_name: "Tether — Backend"

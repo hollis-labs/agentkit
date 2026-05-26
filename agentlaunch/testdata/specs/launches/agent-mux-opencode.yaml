@@ -1,0 +1,11 @@
+# Reproduces legacy launches/agent-mux-opencode.yaml. Provider
+# cross-product sample 4/5 — opencode runner.
+spec: tether.launch
+name: agent-mux-opencode
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/agent-mux
+  runner: opencode
+  isolation: hybrid
+  project: agent-mux
+  agent_role: backend
+  display_name: "Agent Mux — OpenCode"

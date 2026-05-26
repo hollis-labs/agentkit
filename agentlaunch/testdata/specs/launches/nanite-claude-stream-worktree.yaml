@@ -1,0 +1,13 @@
+# Reproduces legacy launches/nanite-claude-stream-worktree.yaml AND
+# boot-profiles/nanite.backend.main.worktree.yaml. The legacy worktree
+# twin differed from its main ONLY in id/display_name/launch/lineage —
+# all now derived. This bag = nanite-claude-stream + isolation:worktree.
+spec: tether.launch
+name: nanite-claude-stream-worktree
+inputs:
+  work_dir: ~/dev/hollis-labs/apps/nanite
+  runner: claude-stream      # common-setup template: claude-stream-worktree
+  isolation: worktree
+  project: nanite
+  agent_role: backend
+  display_name: "Nanite — Backend Worktree"

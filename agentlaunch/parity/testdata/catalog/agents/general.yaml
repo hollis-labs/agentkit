@@ -1,0 +1,5 @@
+id: general
+name: General Agent
+roles: [general]
+permissions:
+  network: true

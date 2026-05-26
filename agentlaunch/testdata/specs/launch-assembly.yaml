@@ -1,0 +1,200 @@
+# S4.4 — The canonical LaunchSpec.
+#
+# This single parameterized spec re-expresses the ENTIRE legacy
+# ~/.tether/catalog/launches/ directory (64 files) plus the folded
+# boot-profiles/ slot payload. Every historical launch — every
+# (agent x project x provider x workspace-mode) tuple, AND every
+# `.worktree` twin — collapses to one LaunchBag (see launches/*.yaml)
+# handed to THIS spec.
+#
+# What changed vs. the legacy file model:
+#
+#   * workspace MODE is now the `isolation` INPUT. The legacy catalog
+#     had a `.worktree` TWIN file for every launch (e.g. nanite-claude
+#     + nanite-claude-worktree) differing only in workspace.mode. In
+#     this model there is ONE spec and the worktree launch is just a
+#     bag with `isolation: worktree`. The twins are gone.
+#
+#   * PROVIDER is now the `runner` INPUT. The legacy catalog had a
+#     separate launch file per provider (nanite-claude, nanite-codex-*,
+#     nanite-opencode). Per D3 the provider feeds the runtime-binding,
+#     NOT the blueprint identity — so it is an input, not a filename.
+#
+#   * Boot-profile SLOTS (recap / history / status / memory / skills)
+#     fold into the vars + template body below. Each legacy slot becomes
+#     a VarSpec; the boot-prompt body is the merge-tag Template.
+#
+# Minimum valid config: a bag need only supply `work_dir` + `runner`.
+# `isolation` and `bus` are the only other knobs and both default here.
+# Every other input carries a default, so the two-knob minimum holds.
+
+id: tether.launch
+display_name: "Tether Launch — canonical parameterized spec"
+
+# ---------------------------------------------------------------------
+# Typed input surface. work_dir + runner are the REQUIRED minimum-config
+# knobs; isolation + bus are the only other knobs (optional, defaulted).
+# Everything below them is a convenience input with a default so it never
+# has to appear in a minimum bag.
+# ---------------------------------------------------------------------
+inputs:
+  # --- minimum config: the two required knobs ---
+  - name: work_dir
+    type: string
+    required: true
+    description: "Agent working directory — the repo/tree the session operates on."
+
+  - name: runner
+    type: string
+    required: true
+    description: "Runner/provider id (claude-code, claude-stream, claude-pty, codex-cli, codex-app-server, opencode). Feeds the runtime-binding per D3 — never blueprint identity."
+
+  # --- minimum config: the two optional knobs ---
+  - name: isolation
+    type: string
+    required: false
+    default: hybrid
+    description: "Workspace-isolation mode. Replaces the legacy .worktree twin files: 'hybrid' = shared tree, 'worktree' = git-worktree isolation."
+
+  - name: bus
+    type: string
+    required: false
+    default: ""
+    description: "Message-bus topic / attach posture. Empty = the runner's default bus posture."
+
+  # --- convenience inputs: all defaulted, never required ---
+  - name: project
+    type: string
+    required: false
+    default: ""
+    description: "Project id this launch is scoped to. Display/identity only — the work_dir is authoritative for where work happens."
+
+  - name: agent_role
+    type: string
+    required: false
+    default: backend
+    description: "Agent role token. Selects which role file the agent_summary var reads."
+
+  - name: display_name
+    type: string
+    required: false
+    default: "Tether agent"
+    description: "Human-readable label for the launched agent."
+
+  - name: include_project_boot
+    type: bool
+    required: false
+    default: true
+    description: "Whether to fold project boot context into the prompt (legacy prompt.include_project_boot)."
+
+  - name: include_agent_boot
+    type: bool
+    required: false
+    default: true
+    description: "Whether to fold agent role context into the prompt (legacy prompt.include_agent_boot)."
+
+# ---------------------------------------------------------------------
+# Derived vars. These fold the legacy boot-profile SLOTS into the S4.2
+# var model. Each var is session-start phase (prompt-text sink) so the
+# boot prompt is assembled fresh and nothing secret-bearing is persisted
+# at rest. on_error=warn keeps a degraded boot working when a slot
+# source (git, recall endpoint) is unavailable.
+#
+# NOTE on sources: these are LITERAL placeholders in this testdata spec
+# so the spec validates and renders standalone. A live deployment swaps
+# the literal sources for the cmd/call sources the legacy slots used
+# (git log, ${TESSERACT_URL}/v1/recall, skill_index) — the var NAMES and
+# the template wiring stay identical, which is the whole point of S4.2.
+# ---------------------------------------------------------------------
+vars:
+  - name: agent_summary
+    source:
+      kind: literal
+      literal: "(agent role summary — live spec resolves this from the role file)"
+    freshness: cache_ok
+    on_error: warn
+    phase: session-start
+
+  - name: recap
+    source:
+      kind: literal
+      literal: "(session-close recap — live spec resolves this from the recall endpoint)"
+    freshness: best_effort
+    on_error: warn
+    phase: session-start
+
+  - name: history
+    source:
+      kind: literal
+      literal: "(git history — live spec resolves this from `git log --oneline -15`)"
+    freshness: fresh
+    on_error: warn
+    phase: session-start
+
+  - name: status
+    source:
+      kind: literal
+      literal: "(git status — live spec resolves this from `git status --short -b`)"
+    freshness: fresh
+    on_error: warn
+    phase: session-start
+
+  - name: memory
+    source:
+      kind: literal
+      literal: "(durable memory — live spec resolves this from the recall endpoint)"
+    freshness: best_effort
+    on_error: warn
+    phase: session-start
+
+  - name: skills
+    source:
+      kind: literal
+      literal: "(skill index — live spec resolves this from the skill_index slot)"
+    freshness: cache_ok
+    on_error: warn
+    phase: session-start
+
+# ---------------------------------------------------------------------
+# Runtime binding. Per D3 this is the runtime-binding kind, distinct from
+# the blueprint identity. Provider here is a placeholder — the live
+# launcher overlays the resolved `runner` input onto this binding before
+# spawn (provider-as-input feeds the runtime-binding, not identity).
+# ---------------------------------------------------------------------
+runtime:
+  provider: claude-code
+  runtime_kind: streaming-stdio
+
+# ---------------------------------------------------------------------
+# Merge-tag template body — the boot prompt. This is the folded
+# boot-profile: the legacy `slots:` block becomes these {{ vars.* }}
+# references, and the legacy launch fields become {{ inputs.* }}.
+# ---------------------------------------------------------------------
+template: |
+  # Boot Prompt — {{ inputs.display_name }}
+
+  ## 1. Identity
+  - Project:    {{ inputs.project }}
+  - Role:       {{ inputs.agent_role }}
+  - Work dir:   {{ inputs.work_dir }}
+  - Runner:     {{ inputs.runner }}
+  - Isolation:  {{ inputs.isolation }}
+  - Bus:        {{ inputs.bus }}
+
+  ## 2. Role
+  {{ vars.agent_summary }}
+
+  ## 3. Resume Now
+  {{ vars.recap }}
+
+  ## 4. Active State
+  ### Git history
+  {{ vars.history }}
+  ### Status
+  {{ vars.status }}
+
+  ## 5. Durable Context
+  ### Memory
+  {{ vars.memory }}
+  ### Skills
+  {{ vars.skills }}

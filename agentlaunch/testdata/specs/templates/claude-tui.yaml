@@ -1,0 +1,4 @@
+# Common-setup template: Claude PTY/TUI runner, shared workspace.
+# Replaces the legacy `-claude-tui` launch suffix.
+runner: claude-pty
+isolation: hybrid

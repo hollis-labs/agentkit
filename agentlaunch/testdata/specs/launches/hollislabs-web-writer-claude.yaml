@@ -1,0 +1,12 @@
+# Reproduces legacy launches/hollislabs-web-writer-claude.yaml — a
+# non-`general` agent (legacy agent: web-writer). Demonstrates the
+# agent_role input carrying a non-default value.
+spec: tether.launch
+name: hollislabs-web-writer-claude
+inputs:
+  work_dir: ~/dev/hollis-labs/sites/hollislabs-web
+  runner: claude-code
+  isolation: hybrid
+  project: hollislabs-web
+  agent_role: web-writer
+  display_name: "Hollis Labs Web — Writer"

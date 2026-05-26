@@ -1,0 +1,5 @@
+id: tether-launcher
+name: Tether Taxi
+repo_root: ~/dev/hollis-labs/apps/tether-launcher
+workspace:
+  default_mode: hybrid
