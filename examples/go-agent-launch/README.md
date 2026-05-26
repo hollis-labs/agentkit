@@ -1,3 +1,4 @@
-# go-agent-launch examples
+# agentkit/agentlaunch examples
 
-Examples added under Phase 1 / Phase 2.
+Runnable examples for the `agentlaunch` packages live here, one `main`
+package per subdirectory.

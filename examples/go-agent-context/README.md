@@ -1,4 +1,4 @@
-# go-agent-context examples
+# agentkit/agentcontext examples
 
-Examples added under Phase 2 once the concrete resolvers and the
-go-agent-launch ContextHook wrapper are committed.
+Runnable examples for the `agentcontext` packages live here, one `main`
+package per subdirectory.

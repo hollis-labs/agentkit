@@ -92,8 +92,8 @@ type PreparedLaunch struct {
 // Lib-managed fields (SystemPrompt, BootContent, ProjectDir, BootDir)
 // are NOT carried here — go-agent-sessions overrides them from the
 // other StartOptions fields, so duplicating them on this struct would
-// create two sources of truth. AgentName, MCPLoopbackURL, MuxCommand,
-// MuxArgs, MuxEnv DO flow through verbatim.
+// create two sources of truth. AgentName, MCPLoopbackURL, SelfMCPCommand,
+// SelfMCPArgs, and SelfMCPEnv do flow through verbatim.
 type PreparedPlantContext struct {
 	// AgentName is the agent display name the per-provider boot-file
 	// renderer references (e.g. "{{.AgentName}}" in CLAUDE.md). Empty
@@ -104,15 +104,17 @@ type PreparedPlantContext struct {
 	// .mcp.json points the agent at for the in-process loopback server.
 	MCPLoopbackURL string `yaml:"mcp_loopback_url,omitempty" json:"mcp_loopback_url,omitempty"`
 
-	// MuxCommand is the absolute path of the mux helper binary the
-	// planted .mcp.json descriptor invokes for self-MCP entries.
-	MuxCommand string `yaml:"mux_command,omitempty" json:"mux_command,omitempty"`
+	// SelfMCPCommand is the absolute path of the helper binary the
+	// planted .mcp.json descriptor invokes for self-MCP entries. For
+	// Tether this is usually the `mux` binary, but the field is kept
+	// neutral because agentkit is not Tether-specific.
+	SelfMCPCommand string `yaml:"self_mcp_command,omitempty" json:"self_mcp_command,omitempty"`
 
-	// MuxArgs is the argv (excluding command) for the mux helper.
-	MuxArgs []string `yaml:"mux_args,omitempty" json:"mux_args,omitempty"`
+	// SelfMCPArgs is the argv (excluding command) for SelfMCPCommand.
+	SelfMCPArgs []string `yaml:"self_mcp_args,omitempty" json:"self_mcp_args,omitempty"`
 
-	// MuxEnv is the environment forwarded to the mux helper subprocess.
-	MuxEnv map[string]string `yaml:"mux_env,omitempty" json:"mux_env,omitempty"`
+	// SelfMCPEnv is the environment forwarded to the helper subprocess.
+	SelfMCPEnv map[string]string `yaml:"self_mcp_env,omitempty" json:"self_mcp_env,omitempty"`
 }
 
 // Validate runs sanity checks on the materialized state. A

@@ -7,9 +7,8 @@ Module path: `github.com/hollis-labs/agentkit`
 `agentkit` is the consolidation of the previously separate `go-agent-*`
 runtime libraries (`go-agent-context`, `go-agent-launch`,
 `go-agent-sessions`, `go-agent-runtime`, `go-agent-broker`) into a single
-Go module with multiple public packages. See
-[agentkit-migration-map.md](../../agentkit-migration-map.md) for the
-rationale and consumer migration plan.
+Go module with multiple public packages. See [CHANGELOG.md](./CHANGELOG.md)
+for the package mapping and release history.
 
 External dependencies (`go-llm-types`, `go-llm-contracts`, `go-providers`,
 `go-runner`, `go-sandbox`) remain separate modules and are required

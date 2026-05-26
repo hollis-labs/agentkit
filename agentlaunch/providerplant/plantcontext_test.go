@@ -18,9 +18,9 @@ func TestPlantContextFor_Mapping(t *testing.T) {
 		PlantContext: agentlaunch.PreparedPlantContext{
 			AgentName:      "Reviewer",
 			MCPLoopbackURL: "http://127.0.0.1:9000/mcp",
-			MuxCommand:     "/usr/bin/mux",
-			MuxArgs:        []string{"mcp", "--proxy"},
-			MuxEnv:         map[string]string{"TOKEN": "t", "ALPHA": "a"},
+			SelfMCPCommand: "/usr/bin/mux",
+			SelfMCPArgs:    []string{"mcp", "--proxy"},
+			SelfMCPEnv:     map[string]string{"TOKEN": "t", "ALPHA": "a"},
 		},
 	}
 	pc := PlantContextFor(prepared)

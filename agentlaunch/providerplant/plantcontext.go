@@ -24,10 +24,12 @@ import (
 //     resolved; Plant captures it before rewiring Workdir to the spawn
 //     cwd)
 //   - BootDir        ← PreparedLaunch.PlantedBootDir
-//   - MuxCommand / MuxArgs ← PreparedPlantContext.MuxCommand / MuxArgs
-//   - MuxEnv         ← PreparedPlantContext.MuxEnv, flattened from the
-//     map form to the "KEY=VALUE" slice form provider.PlantContext uses,
-//     sorted by key for deterministic planted output
+//   - MuxCommand / MuxArgs ← PreparedPlantContext.SelfMCPCommand /
+//     SelfMCPArgs
+//   - MuxEnv              ← PreparedPlantContext.SelfMCPEnv, flattened
+//     from the map form to the "KEY=VALUE" slice form
+//     provider.PlantContext uses, sorted by key for deterministic
+//     planted output
 //
 // PlantContextFor is exported so the sessionshim package can build the
 // same context for StartOptions.PlantContext without duplicating the
@@ -43,9 +45,9 @@ func PlantContextFor(prepared *agentlaunch.PreparedLaunch) provider.PlantContext
 		MCPLoopbackURL: prepared.PlantContext.MCPLoopbackURL,
 		ProjectDir:     prepared.Workdir,
 		BootDir:        prepared.PlantedBootDir,
-		MuxCommand:     prepared.PlantContext.MuxCommand,
-		MuxArgs:        prepared.PlantContext.MuxArgs,
-		MuxEnv:         muxEnvKV(prepared.PlantContext.MuxEnv),
+		MuxCommand:     prepared.PlantContext.SelfMCPCommand,
+		MuxArgs:        prepared.PlantContext.SelfMCPArgs,
+		MuxEnv:         muxEnvKV(prepared.PlantContext.SelfMCPEnv),
 	}
 	if pc.BootContent == "" {
 		pc.BootContent = pc.SystemPrompt
