@@ -418,7 +418,7 @@ func resolveNew(ctx context.Context, spec agentlaunch.LaunchSpec, bagPath string
 		return NormalizedPlan{}, fmt.Errorf("minimum-config: %w", err)
 	}
 
-	req := bag.RenderRequest(agentlaunch.FrontEndInteractive)
+	req := bag.RenderRequest(agentlaunch.PolicyCollect)
 	if req.Vars == nil {
 		req.Vars = map[string]any{}
 	}

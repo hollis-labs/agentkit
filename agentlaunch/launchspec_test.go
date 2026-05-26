@@ -33,7 +33,7 @@ func resolveSpecVars(t *testing.T, spec LaunchSpec) map[string]any {
 // full S4.2 + S4.1 path.
 func renderBag(t *testing.T, spec LaunchSpec, bag LaunchBag) RenderResult {
 	t.Helper()
-	req := bag.RenderRequest(FrontEndAutonomous)
+	req := bag.RenderRequest(PolicyError)
 	req.Vars = resolveSpecVars(t, spec)
 	res, err := spec.Render(req)
 	if err != nil {

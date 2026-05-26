@@ -30,7 +30,7 @@ type PlanFromLaunchInput struct {
 	// Bag is the concrete launch invocation. Used for provenance only.
 	Bag LaunchBag
 
-	// Render is the output of Spec.Render(Bag.RenderRequest(frontEnd)) —
+	// Render is the output of Spec.Render(Bag.RenderRequest(onMissing)) —
 	// the rendered boot body plus the resolved input map.
 	Render RenderResult
 

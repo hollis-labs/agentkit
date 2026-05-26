@@ -79,20 +79,27 @@ func (a AssemblySpec) Validate() error {
 	return nil
 }
 
-// RenderFrontEnd selects how a missing required input is handled by Render.
-type RenderFrontEnd int
+// MissingPolicy selects how Render handles a missing required input or
+// declared-but-unresolved var. Zero value is PolicyError (strict): the
+// default for a non-interactive front-end. PolicyCollect is the opt-in
+// soft-fail mode for human-driven front-ends that gather missing values
+// and re-render.
+type MissingPolicy int
 
 const (
-	// FrontEndAutonomous is the non-interactive front-end. A required
-	// input with no default and no supplied value is a hard error: there
-	// is no human to collect it from.
-	FrontEndAutonomous RenderFrontEnd = iota
+	// PolicyError is the strict, fail-loud policy. A required input with
+	// no default and no supplied value (or a declared var absent from
+	// req.Vars) makes Render return ErrAssemblyMissingRequiredInput.
+	// PolicyError is the zero value, so an empty RenderRequest gets
+	// strict semantics without explicit opt-in.
+	PolicyError MissingPolicy = iota
 
-	// FrontEndInteractive is the human-driven front-end. A required input
-	// with no default and no supplied value is not rendered as an error;
-	// instead Render reports it via RenderResult.Missing so the caller can
-	// collect it and re-render.
-	FrontEndInteractive
+	// PolicyCollect is the soft-fail policy for interactive front-ends.
+	// Missing values do not error; instead Render returns the body with
+	// each missing tag collapsed to the empty string and populates
+	// RenderResult.Missing so the caller can collect the values and
+	// re-render.
+	PolicyCollect
 )
 
 // RenderRequest is the input bag for one AssemblySpec render.
@@ -107,8 +114,9 @@ type RenderRequest struct {
 	// template but absent here is reported via RenderResult.Missing.
 	Vars map[string]any
 
-	// FrontEnd selects missing-required-input handling.
-	FrontEnd RenderFrontEnd
+	// OnMissing selects missing-required-input handling. Zero value =
+	// PolicyError (strict).
+	OnMissing MissingPolicy
 }
 
 // RenderResult is the deterministic output of an AssemblySpec render.
@@ -122,9 +130,9 @@ type RenderResult struct {
 	ResolvedInputs map[string]any
 
 	// Missing lists declared-required inputs (and template-referenced
-	// vars) that had no value. For FrontEndInteractive this is the
-	// collect-me list; for FrontEndAutonomous a non-empty Missing means
-	// Render returned an error and Body is empty.
+	// vars) that had no value. For PolicyCollect this is the collect-me
+	// list; for PolicyError a non-empty Missing means Render returned an
+	// error and Body is empty.
 	Missing []string
 }
 
@@ -140,6 +148,13 @@ type RenderResult struct {
 // Render does not resolve derived vars. req.Vars supplies already-resolved
 // var values; an unresolved var referenced by the template is reported in
 // Missing exactly like a missing required input.
+//
+// req.OnMissing controls missing-value handling:
+//   - PolicyError (default, zero value): a missing required input or var
+//     makes Render return ErrAssemblyMissingRequiredInput.
+//   - PolicyCollect: missing values populate RenderResult.Missing and
+//     Render returns the body with each missing tag collapsed to the
+//     empty string. Used by interactive front-ends that collect values.
 func (a AssemblySpec) Render(req RenderRequest) (RenderResult, error) {
 	if err := a.BootSpec.Validate(); err != nil {
 		return RenderResult{}, err
@@ -206,7 +221,7 @@ func (a AssemblySpec) Render(req RenderRequest) (RenderResult, error) {
 	// across runs regardless of Go map iteration order.
 	sortMissing(a.Inputs, missing)
 
-	if len(missing) > 0 && req.FrontEnd == FrontEndAutonomous {
+	if len(missing) > 0 && req.OnMissing == PolicyError {
 		return RenderResult{ResolvedInputs: resolved, Missing: missing},
 			fmt.Errorf("%w: %s", ErrAssemblyMissingRequiredInput, strings.Join(missing, ", "))
 	}

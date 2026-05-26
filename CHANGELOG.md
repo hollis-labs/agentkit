@@ -4,6 +4,22 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.0 — 2026-05-26
+
+### Changed
+
+- **Strict-by-default missing-value policy** for `agentlaunch.AssemblySpec.Render`.
+  The existing strict-when-autonomous semantic is unchanged; the
+  surrounding API is renamed for clarity:
+    - `RenderFrontEnd` → `MissingPolicy`
+    - `FrontEndAutonomous` → `PolicyError` (zero value, default = strict)
+    - `FrontEndInteractive` → `PolicyCollect` (opt-in soft-fail)
+    - `RenderRequest.FrontEnd` → `RenderRequest.OnMissing`
+    - `LaunchBag.RenderRequest(frontEnd)` parameter → `RenderRequest(onMissing)`
+  An empty `RenderRequest{}` now reads naturally as the strict default
+  (`PolicyError` is implicit). Callers wanting the previous interactive
+  behavior pass `OnMissing: PolicyCollect` explicitly.
+
 ## v0.2.0 — 2026-05-26
 
 ### Changed

@@ -77,7 +77,7 @@ func TestRenderDeterministic(t *testing.T) {
 	req := RenderRequest{
 		Inputs:   map[string]any{"ticket": "CW-20260517-0026"},
 		Vars:     map[string]any{"role_summary": "Backend engineer."},
-		FrontEnd: FrontEndAutonomous,
+		OnMissing: PolicyError,
 	}
 	first, err := a.Render(req)
 	if err != nil {
@@ -106,7 +106,7 @@ func TestRenderSuppliedInputOverridesDefault(t *testing.T) {
 	res, err := a.Render(RenderRequest{
 		Inputs:   map[string]any{"ticket": "CW-1", "role": "frontend", "verbose": true},
 		Vars:     map[string]any{"role_summary": "x"},
-		FrontEnd: FrontEndAutonomous,
+		OnMissing: PolicyError,
 	})
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
@@ -124,7 +124,7 @@ func TestRenderAutonomousErrorsOnMissingRequiredInput(t *testing.T) {
 	res, err := a.Render(RenderRequest{
 		// ticket (required, no default) omitted.
 		Vars:     map[string]any{"role_summary": "x"},
-		FrontEnd: FrontEndAutonomous,
+		OnMissing: PolicyError,
 	})
 	if !errors.Is(err, ErrAssemblyMissingRequiredInput) {
 		t.Fatalf("Render() error = %v, want ErrAssemblyMissingRequiredInput", err)
@@ -142,7 +142,7 @@ func TestRenderInteractiveCollectsMissingRequiredInput(t *testing.T) {
 	res, err := a.Render(RenderRequest{
 		// ticket omitted.
 		Vars:     map[string]any{"role_summary": "x"},
-		FrontEnd: FrontEndInteractive,
+		OnMissing: PolicyCollect,
 	})
 	if err != nil {
 		t.Fatalf("Render() error = %v, want nil for interactive front-end", err)
@@ -162,7 +162,7 @@ func TestRenderReportsMissingVar(t *testing.T) {
 	res, err := a.Render(RenderRequest{
 		Inputs: map[string]any{"ticket": "CW-1"},
 		// role_summary var not supplied.
-		FrontEnd: FrontEndInteractive,
+		OnMissing: PolicyCollect,
 	})
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
@@ -199,7 +199,7 @@ func TestRenderMissingOrderingDeterministic(t *testing.T) {
 		},
 		Template: "{{ inputs.zeta }}{{ inputs.alpha }}{{ vars.wvar }}{{ vars.avar }}",
 	}
-	res, err := a.Render(RenderRequest{FrontEnd: FrontEndInteractive})
+	res, err := a.Render(RenderRequest{OnMissing: PolicyCollect})
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
@@ -218,7 +218,7 @@ func TestRenderEscapedBraces(t *testing.T) {
 		},
 		Template: "literal {{{{ inputs.name }}}} and real {{ inputs.name }}",
 	}
-	res, err := a.Render(RenderRequest{FrontEnd: FrontEndAutonomous})
+	res, err := a.Render(RenderRequest{OnMissing: PolicyError})
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRenderOneSpecManyInvocations(t *testing.T) {
 		res, err := a.Render(RenderRequest{
 			Inputs:   inv,
 			Vars:     map[string]any{"role_summary": "s"},
-			FrontEnd: FrontEndAutonomous,
+			OnMissing: PolicyError,
 		})
 		if err != nil {
 			t.Fatalf("Render(%v) error = %v", inv, err)

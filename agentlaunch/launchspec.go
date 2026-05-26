@@ -249,11 +249,11 @@ func satisfied(declared map[string]BootInput, bag LaunchBag, name string) bool {
 // RenderRequest builds the S4.1 RenderRequest for invoking spec with this
 // bag. It is the bridge from the S4.4 bag model to the S4.1 renderer:
 // callers pass the result straight to LaunchSpec.Render.
-func (b LaunchBag) RenderRequest(frontEnd RenderFrontEnd) RenderRequest {
+func (b LaunchBag) RenderRequest(onMissing MissingPolicy) RenderRequest {
 	return RenderRequest{
-		Inputs:   b.Inputs,
-		Vars:     b.Vars,
-		FrontEnd: frontEnd,
+		Inputs:    b.Inputs,
+		Vars:      b.Vars,
+		OnMissing: onMissing,
 	}
 }
 
