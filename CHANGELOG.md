@@ -64,7 +64,7 @@ runtime libraries into a single module per
 - `github.com/hollis-labs/go-llm-contracts` v0.3.0
 - `github.com/hollis-labs/go-llm-types` v0.3.0
 - `github.com/hollis-labs/go-providers` v0.23.0
-- `github.com/hollis-labs/go-runner` v0.6.0
+- `github.com/hollis-labs/go-runner` v0.5.0
 - `github.com/hollis-labs/go-sandbox` v0.2.1
 
 ### Migration notes
