@@ -4,6 +4,91 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.0 — 2026-08-21
+
+### Fixed — BEHAVIORAL CHANGE, not just a bug fix — read before bumping your pin
+
+**`agentsessions.NewFromAdapter`'s subprocess-per-turn runtime (`adapterSession`,
+`Caps{}` all false — the default, and the shape every `CLIAdapter` gets unless it
+opts into PTY / StreamingStdio / JsonRpcStdio / ServeHTTP) now always delivers a
+terminal `llmtypes.StreamEvent` — `EventDone` on a clean turn, `EventError`
+otherwise — to `StartOptions.EventFanout` / `StartOptions.Fanout`, even when the
+driven `provider.CLIAdapter`'s own `ParseLine` never emits one of its own.**
+
+Previously, `adapterSession.handleRunnerEvent`'s `runner.EventProcessExited` case
+did nothing but reset the tracked PID. For an adapter whose `ParseLine` never
+emits `llmtypes.EventDone` / `EventError` / `EventUsage` — true today for
+`go-providers`' `OpencodeAdapter` (Mode `""`, i.e. `opencode run`) by design,
+since opencode has no structured completion line on stdout — a turn's real
+subprocess could spawn, run, produce real output, and exit cleanly, and **no
+terminal event would ever reach `EventFanout`/`Fanout`**, regardless of how long
+the caller waited. Any downstream consumer that keys turn completion off a
+terminal `llmtypes.StreamEvent` (e.g. `go-agent-wrapper`'s
+`event_translator.go`, which maps `EventDone`/`EventUsage` to
+`runtimeevents.KindTurnCompleted`) would hang forever even though the process
+itself had long since exited — a real, 100%-reproducible, live-dogfeed-confirmed
+bug for every OpenCode CLI-hosted chat turn.
+
+`adapterSession.SendInput` now tracks, per turn, whether `handleRunnerEvent` ever
+observed the adapter's own `EventDone`/`EventError`/`EventUsage` — a session
+field, `turnSawTerminal`, reset at the top of each `SendInput` and set from
+`handleRunnerEvent`'s `EventProviderEvent` case. After `runner.Run` returns
+(covering both `EventProcessExited` and `EventProcessTimeout` — every path
+`runner.Run` can return through), if the adapter never produced its own terminal
+event, `SendInput` synthesizes one from `runner.Run`'s own return value: `nil` →
+`EventDone`, non-nil → `EventError` with the error text. The synthesized event
+flows through the exact same `tryEventFanout`/`encodeStreamEvent` path
+`handleRunnerEvent` already used, so downstream consumers cannot distinguish a
+synthesized terminal event from one the adapter emitted itself.
+
+**Adapters whose `ParseLine` already emits its own terminal event (Codex's
+`"turn.completed"` line, for example) are unaffected — `turnSawTerminal` short-
+circuits the synthesis, so no double-fire.** Verified directly by a dedicated
+regression test (`TestAdapterRuntime_DoesNotDoubleFireTerminalEvent_WhenAdapterEmitsItsOwn`)
+using a fake adapter whose `ParseLine` behaves exactly like Codex's shape (emits
+its own terminal event before the process exits) — confirms the fanout carries
+exactly one `EventDone`, not two, under the fix. A second variant
+(`...WhenAdapterEmitsUsageOnly`) confirms `EventUsage` alone (no `EventDone`)
+also counts as "already terminal" and suppresses synthesis, per this fix's
+explicit scope (`EventDone`/`EventError`/`EventUsage`, not just `EventDone`).
+
+**If you drive `NewFromAdapter`'s default (non-PTY) runtime and previously
+relied on the adapter runtime silently producing no terminal event for an
+adapter like OpenCode's — e.g. a consumer that itself synthesized completion
+some other way, or that intentionally left a turn "open" pending a later
+out-of-band signal — re-check that assumption before bumping this pin.** A turn
+driving such an adapter will now, for the first time, see a terminal
+`llmtypes.StreamEvent` land on `EventFanout`/`Fanout` shortly after the real
+subprocess exits.
+
+### Verification
+
+- darwin host: `go build ./...`, `go vet ./...` — clean.
+- `go test -race -count=3 ./agentsessions/...` — green, including four new
+  real-subprocess (not mocked) regression tests in
+  `agentsessions/from_adapter_terminal_synthesis_test.go`: a fake adapter whose
+  `ParseLine` only ever emits `EventDelta` (mirroring `OpencodeAdapter`'s real
+  contract) driving a real spawned-and-cleanly-exited subprocess
+  (`TestAdapterRuntime_SynthesizesEventDone_WhenAdapterNeverEmitsTerminalEvent`)
+  and a real spawned-and-non-zero-exited subprocess
+  (`TestAdapterRuntime_SynthesizesEventError_WhenAdapterNeverEmitsTerminalEvent_AndProcessFails`),
+  plus the two no-double-fire variants above.
+- `go test -race -count=1 ./...` — green across every package except the
+  pre-existing, environment-linked `agentlaunch/parity.TestParity_LiveCatalog`
+  failure (a live-catalog drift against `~/.tether/catalog`, already documented
+  as unrelated in the v0.4.0 entry below and untouched by this change — this
+  fix's diff is scoped entirely to `agentsessions/from_adapter.go` plus its own
+  new test file).
+- Codex's own already-terminal-event-emitting `ParseLine`
+  (`go-providers/provider/pty_codex.go`'s `"turn.completed"` handling) was
+  independently modeled (not exercised via the real `codex` binary — that binary
+  was not invoked from this repo) by the `echoAdapter` fake already used
+  throughout `agentsessions`' existing test suite, which emits its own `done`
+  line the same way Codex's real adapter emits its own `EventDone` — confirmed
+  not to double-fire under this fix (see the "no double-fire" test above). A
+  live `codex` binary re-verification against the real adapter is the
+  Nanite-side dogfeed's job, not this library-level fix's.
+
 ## v0.4.0 — 2026-08-21
 
 ### Fixed — BEHAVIORAL CHANGE, not just a bug fix — read before bumping your pin

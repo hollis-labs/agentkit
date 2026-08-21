@@ -197,6 +197,22 @@ type adapterSession struct {
 	lastPID atomic.Int32 // sticky most-recent PID — survives turn boundaries
 	turnID  atomic.Value // string
 
+	// turnSawTerminal tracks whether the adapter's own ParseLine emitted a
+	// terminal llmtypes.StreamEvent (EventDone / EventError / EventUsage)
+	// during the in-flight turn. Reset at the top of each SendInput;
+	// consulted after runner.Run returns to decide whether SendInput must
+	// synthesize a terminal event on the adapter's behalf (see
+	// synthesizeTerminalEvent). Some adapters — OpenCode's `opencode
+	// run`, by design — never emit one of their own because the CLI has
+	// no structured completion signal on stdout; others (Codex) do.
+	// Reads/writes happen only from the single goroutine that owns the
+	// in-flight turn (SendInput holds turnMu for the whole call and
+	// go-runner's runOnce invokes cfg.OnEvent synchronously within that
+	// same call stack — no separate goroutine parses provider events), so
+	// a plain bool is safe; atomic.Bool is used anyway for consistency
+	// with the rest of this struct's fields.
+	turnSawTerminal atomic.Bool
+
 	stopCh   chan struct{}
 	stopOnce sync.Once
 
@@ -251,6 +267,7 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 
 	turnID := defaultIDFn()
 	s.turnID.Store(turnID)
+	s.turnSawTerminal.Store(false)
 	s.state.Store(int32(LiveStateProcessing))
 	defer s.state.Store(int32(LiveStateIdle))
 
@@ -281,11 +298,51 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	// the adapter path remains a follow-up increment — see CHANGELOG
 	// "Out of scope".
 	err := runner.Run(runCtx, cfg)
+
+	// runner.Run has fully returned — cfg.OnEvent (handleRunnerEvent) has
+	// already observed every EventProviderEvent the adapter emitted for
+	// this turn, synchronously, on this same goroutine (go-runner's
+	// runOnce calls OnEvent directly from streamProviderEvents/its own
+	// terminal switch, never from a separate goroutine). If the adapter
+	// never produced its own terminal llmtypes.StreamEvent
+	// (EventDone/EventError/EventUsage) — true today for OpenCode's
+	// `opencode run`, whose ParseLine only ever emits EventDelta by
+	// design — synthesize one here so a real subprocess exit always
+	// surfaces a terminal event to EventFanout/Fanout. Adapters that
+	// already emit their own (Codex's "turn.completed" line, for example)
+	// are unaffected: turnSawTerminal short-circuits this before it fires.
+	if !s.turnSawTerminal.Load() {
+		s.synthesizeTerminalEvent(err)
+	}
+
 	if err != nil {
 		s.exitCode.Store(1)
 		return err
 	}
 	return nil
+}
+
+// synthesizeTerminalEvent emits a terminal llmtypes.StreamEvent — EventDone
+// on a clean turn (runErr == nil), EventError otherwise — through the same
+// EventFanout/Fanout surfaces handleRunnerEvent's EventProviderEvent case
+// uses. Only called when the adapter's own ParseLine never produced a
+// terminal event during the turn (see turnSawTerminal); the resulting
+// event is indistinguishable, to any downstream consumer, from one the
+// adapter emitted itself — event_translator-style mappers that key off
+// llmtypes.EventDone/EventError need no changes to observe it.
+func (s *adapterSession) synthesizeTerminalEvent(runErr error) {
+	var synth llmtypes.StreamEvent
+	if runErr != nil {
+		synth = llmtypes.StreamEvent{Type: llmtypes.EventError, Error: runErr.Error()}
+	} else {
+		synth = llmtypes.StreamEvent{Type: llmtypes.EventDone}
+	}
+	tryEventFanout(s.opts.EventFanout, synth)
+	if s.opts.Fanout != nil {
+		if line, ok := encodeStreamEvent(synth); ok {
+			_, _ = s.opts.Fanout.Write(line)
+		}
+	}
 }
 
 // handleRunnerEvent forwards runner events to the Fanout writer (which
@@ -306,6 +363,12 @@ func (s *adapterSession) handleRunnerEvent(ev runner.Event) {
 				if s.opts.OnSessionID != nil {
 					s.opts.OnSessionID(pe.SessionID)
 				}
+			}
+			if pe.Type == llmtypes.EventDone || pe.Type == llmtypes.EventError || pe.Type == llmtypes.EventUsage {
+				// The adapter emitted its own terminal event this turn
+				// (e.g. Codex's "turn.completed") — SendInput's post-Run
+				// synthesis must not double-fire once runner.Run returns.
+				s.turnSawTerminal.Store(true)
 			}
 			tryEventFanout(s.opts.EventFanout, pe)
 			if s.opts.Fanout != nil {
