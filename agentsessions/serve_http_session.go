@@ -126,7 +126,18 @@ func (r *serveHTTPRuntime) Start(ctx context.Context, opts StartOptions) (Sessio
 	}
 
 	go s.runEventStream()
-	go s.finishOnProcessExit()
+	// finishOnProcessExit is intentionally NOT started again here — it
+	// was already started once at line ~97, right after spawn(). A
+	// second call used to fire here too; both goroutines raced to
+	// receive the single value on the buffered, close-once
+	// s.processDone channel, so roughly half the time this second
+	// (later-started) goroutine instead received the zero value off the
+	// already-closed channel and won the s.waitOnce.Do race, silently
+	// discarding the real exit error (including a real *ExitError from
+	// an abnormal exit — the exact bug this file's finishOnProcessExit
+	// fix above targets). One waiter, started once, is sufficient: it
+	// observes the process's exit at any point in Start()'s lifetime,
+	// not just after this point.
 
 	if opts.AutoFireFirstTurn && len(opts.FirstTurnPayload) > 0 {
 		if err := s.SendInput(ctx, opts.FirstTurnPayload); err != nil {
@@ -483,21 +494,36 @@ func (s *serveHTTPSession) finishOnProcessExit() {
 	s.alive.Store(false)
 	s.state.Store(int32(LiveStateStopped))
 	s.waitOnce.Do(func() {
-		switch {
-		case err == nil:
+		// This runtime has no supervised variant at all (StartOptions.
+		// Supervisor is never consulted here) — finishOnProcessExit is
+		// its ONLY waiter path. See streamingStdioSession.
+		// spawnWaiterLegacy for the full rationale: reuse buildExitError
+		// so an abnormal exit — non-zero code or signal death — always
+		// surfaces through Wait() as a real *agentsessions.ExitError
+		// instead of a nil error. Cause is left empty; no Supervisor is
+		// attached on this path. cmd.Wait() (called in spawn()'s own
+		// goroutine, which sent err on s.processDone above) always
+		// populates s.cmd.ProcessState before returning, so it's safe
+		// to read here without additional synchronization.
+		var ps *os.ProcessState
+		if s.cmd != nil {
+			ps = s.cmd.ProcessState
+		}
+		exitErr := buildExitError(ps, err, "")
+
+		if exitErr == nil {
 			s.waitCode.Store(0)
-		default:
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
-				s.waitCode.Store(int32(ee.ExitCode()))
-			} else {
-				s.waitCode.Store(-1)
-				s.waitErr.Store(err)
-			}
+		} else {
+			s.waitCode.Store(int32(exitErr.Code))
+			s.waitErr.Store(exitErr)
 		}
 		_ = s.logFile.Close()
 		cleanupBootDir(s.bootDir)
-		s.done <- err
+		if exitErr == nil {
+			s.done <- nil
+		} else {
+			s.done <- exitErr
+		}
 		close(s.done)
 	})
 }

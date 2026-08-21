@@ -519,20 +519,24 @@ func (s *jsonRpcStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteClo
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
 
+		// See streamingStdioSession.spawnWaiterLegacy for the full
+		// rationale (identical copy of the same waiter shape, same
+		// pre-existing bug): reuse buildExitError so an abnormal exit —
+		// non-zero code or signal death — always surfaces through
+		// Wait() as a real *agentsessions.ExitError instead of a nil
+		// error. Cause is left empty; no Supervisor is attached on this
+		// path.
+		exitErr := buildExitError(cmd.ProcessState, err, "")
+
 		s.waitOnce.Do(func() {
-			switch {
-			case err == nil:
+			if exitErr == nil {
 				s.waitCode.Store(0)
-			default:
-				var ee *exec.ExitError
-				if errors.As(err, &ee) {
-					s.waitCode.Store(int32(ee.ExitCode()))
-				} else {
-					s.waitCode.Store(-1)
-					s.waitErr.Store(err)
-				}
+				s.done <- nil
+			} else {
+				s.waitCode.Store(int32(exitErr.Code))
+				s.waitErr.Store(exitErr)
+				s.done <- exitErr
 			}
-			s.done <- err
 			close(s.done)
 		})
 		if s.legacyCleanup != nil {

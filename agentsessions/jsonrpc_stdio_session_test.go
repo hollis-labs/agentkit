@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -134,6 +135,81 @@ func TestJsonRpcStdioSession_HappyPath_CallStop(t *testing.T) {
 	}
 	if _, err := sess.Wait(); err != nil {
 		t.Errorf("Wait: %v", err)
+	}
+}
+
+// TestJsonRpcStdioSession_ExternalSigkill_SurfacesExitError is the
+// jsonrpc-stdio counterpart of TestStreamingStdioSession_
+// ExternalSigkill_SurfacesExitError (streaming_stdio_session_test.go) —
+// jsonRpcStdioSession.spawnWaiterLegacy is its own independent copy of
+// the exact same waiter shape (and carried the identical pre-existing
+// bug) rather than sharing streamingStdioSession's implementation. See
+// that test's doc comment for the full rationale; kept here as a
+// real-subprocess (not fake) regression test specifically for this
+// runtime kind (Codex `app-server`'s shape), per this task's own
+// instruction to audit — not assume — that jsonrpc_stdio_session.go was
+// unaffected.
+func TestJsonRpcStdioSession_ExternalSigkill_SurfacesExitError(t *testing.T) {
+	dir := t.TempDir()
+	script := writeJsonRpcEchoScript(t, dir)
+
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{
+		ID:      "jsonrpc-sigkill",
+		Kind:    "cli",
+		Adapter: &minimalAdapter{binary: script},
+		Caps:    Capabilities{JsonRpcStdio: true, BinaryRequired: true},
+	})
+	if err != nil {
+		t.Fatalf("NewFromAdapter: %v", err)
+	}
+
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir: dir,
+		LogPath: filepath.Join(dir, "session.log"),
+		// StartOptions.Supervisor intentionally left nil — targets the
+		// unsupervised legacy waiter.
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sess.Stop(context.Background()) }()
+
+	reporter, ok := sess.(PIDReporter)
+	if !ok {
+		t.Fatal("session does not implement PIDReporter")
+	}
+	pid := reporter.LivePID()
+	if pid == 0 {
+		t.Fatal("LivePID = 0 after Start")
+	}
+
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("syscall.Kill(%d, SIGKILL): %v", pid, err)
+	}
+
+	code, waitErr := sess.Wait()
+	if waitErr == nil {
+		t.Fatal("Wait() returned a nil error for a SIGKILL'd process — legacy-waiter regression")
+	}
+
+	var xe *ExitError
+	if !errors.As(waitErr, &xe) {
+		t.Fatalf("Wait() error = %v (%T), want errors.As-extractable *ExitError", waitErr, waitErr)
+	}
+	if xe.Signal != int(syscall.SIGKILL) {
+		t.Errorf("ExitError.Signal = %d, want %d (SIGKILL)", xe.Signal, syscall.SIGKILL)
+	}
+	if !xe.Killed {
+		t.Error("ExitError.Killed = false, want true for a SIGKILL death")
+	}
+	if xe.Code != -1 {
+		t.Errorf("ExitError.Code = %d, want -1", xe.Code)
+	}
+	if xe.Cause != "" {
+		t.Errorf("ExitError.Cause = %q, want empty (no Supervisor attached on this path)", xe.Cause)
+	}
+	if code != -1 {
+		t.Errorf("Wait() code = %d, want -1", code)
 	}
 }
 

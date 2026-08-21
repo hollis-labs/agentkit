@@ -5,6 +5,7 @@ package agentsessions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -232,6 +234,98 @@ func TestServeHTTPRuntime_SendInputRejectsConcurrentTurn(t *testing.T) {
 	}
 	if err := sess.SendInput(context.Background(), []byte("second")); err != ErrTurnInFlight {
 		t.Fatalf("SendInput second = %v, want ErrTurnInFlight", err)
+	}
+}
+
+// TestServeHTTPRuntime_ExternalSigkill_SurfacesExitError is the
+// serve-http-runtime counterpart of TestStreamingStdioSession_
+// ExternalSigkill_SurfacesExitError (streaming_stdio_session_test.go).
+// serveHTTPSession.finishOnProcessExit is this runtime's own independent
+// copy of the same unsupervised-waiter shape (this runtime has no
+// supervised variant at all — finishOnProcessExit is its ONLY waiter
+// path, StartOptions.Supervisor is never consulted here) and carried the
+// identical pre-existing bug. See that test's doc comment for the full
+// rationale; kept here as a real-subprocess (not fake) regression test
+// specifically for this runtime kind (opencode `serve`'s shape).
+func TestServeHTTPRuntime_ExternalSigkill_SurfacesExitError(t *testing.T) {
+	dir := t.TempDir()
+	script := writeServeHTTPFakeBinary(t, dir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/global/health":
+			_, _ = w.Write([]byte(`{"healthy":true,"version":"test"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/session":
+			_, _ = w.Write([]byte(`{"id":"ses_sigkill"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/event":
+			w.Header().Set("content-type", "text/event-stream")
+			<-r.Context().Done()
+		case r.Method == http.MethodPost && (r.URL.Path == "/global/dispose" || r.URL.Path == "/session/ses_sigkill/abort"):
+			_, _ = w.Write([]byte(`true`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{
+		ID:      "serve-http-sigkill",
+		Kind:    "cli",
+		Adapter: &echoAdapter{script: script},
+		Caps:    Capabilities{ServeHTTP: true, BinaryRequired: true},
+	})
+	if err != nil {
+		t.Fatalf("NewFromAdapter: %v", err)
+	}
+
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir: dir,
+		LogPath: filepath.Join(dir, "session.log"),
+		Env:     append(os.Environ(), "TEST_SERVER_URL="+server.URL),
+		// StartOptions.Supervisor intentionally left nil — this runtime
+		// has no supervised variant regardless.
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sess.Stop(context.Background()) }()
+
+	reporter, ok := sess.(PIDReporter)
+	if !ok {
+		t.Fatal("session does not implement PIDReporter")
+	}
+	pid := reporter.LivePID()
+	if pid == 0 {
+		t.Fatal("LivePID = 0 after Start")
+	}
+
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("syscall.Kill(%d, SIGKILL): %v", pid, err)
+	}
+
+	code, waitErr := sess.Wait()
+	if waitErr == nil {
+		t.Fatal("Wait() returned a nil error for a SIGKILL'd process — legacy-waiter regression")
+	}
+
+	var xe *ExitError
+	if !errors.As(waitErr, &xe) {
+		t.Fatalf("Wait() error = %v (%T), want errors.As-extractable *ExitError", waitErr, waitErr)
+	}
+	if xe.Signal != int(syscall.SIGKILL) {
+		t.Errorf("ExitError.Signal = %d, want %d (SIGKILL)", xe.Signal, syscall.SIGKILL)
+	}
+	if !xe.Killed {
+		t.Error("ExitError.Killed = false, want true for a SIGKILL death")
+	}
+	if xe.Code != -1 {
+		t.Errorf("ExitError.Code = %d, want -1", xe.Code)
+	}
+	if xe.Cause != "" {
+		t.Errorf("ExitError.Cause = %q, want empty (no Supervisor attached on this path)", xe.Cause)
+	}
+	if code != -1 {
+		t.Errorf("Wait() code = %d, want -1", code)
 	}
 }
 

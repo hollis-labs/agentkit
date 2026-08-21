@@ -412,20 +412,34 @@ func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteC
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
 
+		// Build a structured *ExitError the same way the supervised path
+		// does (buildExitError, supervision.go), so an unsupervised
+		// session's abnormal exit — a non-zero exit code, OR a signal
+		// death such as an external SIGKILL — is always surfaced through
+		// Wait() as a real, typed *agentsessions.ExitError, not silently
+		// downgraded to a nil error. Prior to this fix, cmd.Wait()'s
+		// *exec.ExitError case only stored the numeric code and never
+		// set waitErr, so Wait() returned (code, nil) for the
+		// overwhelming majority of abnormal exits (any signal death
+		// included) — indistinguishable from a clean exit to callers
+		// like internal/recovery/broker that classify via
+		// errors.As(err, &xe). Cause is left empty: no Supervisor is
+		// attached on this path to have driven the exit, matching the
+		// same "ordinary, non-supervisor-driven exit" convention
+		// documented on ExitError.Cause and already used by the
+		// supervised path's own restartEligible/CauseRestartExhausted
+		// handling.
+		exitErr := buildExitError(cmd.ProcessState, err, "")
+
 		s.waitOnce.Do(func() {
-			switch {
-			case err == nil:
+			if exitErr == nil {
 				s.waitCode.Store(0)
-			default:
-				var ee *exec.ExitError
-				if errors.As(err, &ee) {
-					s.waitCode.Store(int32(ee.ExitCode()))
-				} else {
-					s.waitCode.Store(-1)
-					s.waitErr.Store(err)
-				}
+				s.done <- nil
+			} else {
+				s.waitCode.Store(int32(exitErr.Code))
+				s.waitErr.Store(exitErr)
+				s.done <- exitErr
 			}
-			s.done <- err
 			close(s.done)
 		})
 		if s.legacyCleanup != nil {

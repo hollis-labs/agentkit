@@ -445,20 +445,25 @@ func (s *ptySession) spawnWaiterLegacy(ptmx *os.File, cmd *exec.Cmd) {
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
 
+		// See streamingStdioSession.spawnWaiterLegacy (streaming_stdio_
+		// session.go) for the full rationale — this is the same waiter
+		// shape (and carried the same pre-existing bug independently,
+		// since this file predates the stdio runtimes). Reuse
+		// buildExitError so an abnormal exit — non-zero code or signal
+		// death — always surfaces through Wait() as a real
+		// *agentsessions.ExitError instead of a nil error. Cause is
+		// left empty; no Supervisor is attached on this path.
+		exitErr := buildExitError(cmd.ProcessState, err, "")
+
 		s.waitOnce.Do(func() {
-			switch {
-			case err == nil:
+			if exitErr == nil {
 				s.waitCode.Store(0)
-			default:
-				var ee *exec.ExitError
-				if errors.As(err, &ee) {
-					s.waitCode.Store(int32(ee.ExitCode()))
-				} else {
-					s.waitCode.Store(-1)
-					s.waitErr.Store(err)
-				}
+				s.done <- nil
+			} else {
+				s.waitCode.Store(int32(exitErr.Code))
+				s.waitErr.Store(exitErr)
+				s.done <- exitErr
 			}
-			s.done <- err
 			close(s.done)
 		})
 		if s.legacyCleanup != nil {

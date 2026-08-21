@@ -5,12 +5,14 @@ package agentsessions
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -278,6 +280,94 @@ func TestStreamingStdioSession_StopClosesStdinAndExits(t *testing.T) {
 	// SendInput after Stop is a write to a closed channel.
 	if err := sess.SendInput(context.Background(), []byte("after-stop")); err != ErrNoInputChannel {
 		t.Errorf("SendInput after Stop = %v, want ErrNoInputChannel", err)
+	}
+}
+
+// TestStreamingStdioSession_ExternalSigkill_SurfacesExitError is the
+// real-subprocess regression test for agentkit's unsupervised
+// legacy-waiter bug: spawnWaiterLegacy never constructed a real
+// *ExitError for cmd.Wait()'s *exec.ExitError branch (any abnormal exit,
+// signal deaths included), so Wait() returned a nil error for a
+// genuinely SIGKILL'd process — indistinguishable from a clean exit to a
+// caller classifying via errors.As(err, &xe) (e.g.
+// internal/recovery/broker in the consuming app). No Supervisor is
+// configured here — this is exactly the "no Nanite CLI session
+// configures a Supervisor today" path the finding is about.
+//
+// A cmd.Wait()-level fake would hide this specific bug (it's about how a
+// real *exec.ExitError from a real killed child gets translated by the
+// errors.As branching), so this spawns a real child via the real
+// streaming-stdio runtime and kills it externally with a real SIGKILL —
+// matching the finding's own `kill -9` repro against a real process,
+// never a mock.
+func TestStreamingStdioSession_ExternalSigkill_SurfacesExitError(t *testing.T) {
+	dir := t.TempDir()
+	script := writeStreamingEchoScript(t, dir, "")
+
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{
+		ID:      "streaming-sigkill",
+		Kind:    "cli",
+		Adapter: &echoAdapter{script: script},
+		Caps:    Capabilities{StreamingStdio: true, BinaryRequired: true},
+	})
+	if err != nil {
+		t.Fatalf("NewFromAdapter: %v", err)
+	}
+
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir: dir,
+		LogPath: filepath.Join(dir, "session.log"),
+		// StartOptions.Supervisor intentionally left nil — this test
+		// targets the unsupervised legacy waiter (spawnWaiterLegacy),
+		// the only waiter path a real Nanite CLI session exercises
+		// today.
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sess.Stop(context.Background()) }()
+
+	reporter, ok := sess.(PIDReporter)
+	if !ok {
+		t.Fatal("session does not implement PIDReporter")
+	}
+	pid := reporter.LivePID()
+	if pid == 0 {
+		t.Fatal("LivePID = 0 after Start")
+	}
+
+	// Real external SIGKILL against the real live child — not a fake,
+	// not a Stop()-driven graceful shutdown. The echo script is already
+	// blocked reading stdin at this point, so no input needs to be sent
+	// first; this mirrors "kill -9 a real, live, healthy claude CLI
+	// subprocess" from the finding.
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("syscall.Kill(%d, SIGKILL): %v", pid, err)
+	}
+
+	code, waitErr := sess.Wait()
+	if waitErr == nil {
+		t.Fatal("Wait() returned a nil error for a SIGKILL'd process — legacy-waiter regression")
+	}
+
+	var xe *ExitError
+	if !errors.As(waitErr, &xe) {
+		t.Fatalf("Wait() error = %v (%T), want errors.As-extractable *ExitError", waitErr, waitErr)
+	}
+	if xe.Signal != int(syscall.SIGKILL) {
+		t.Errorf("ExitError.Signal = %d, want %d (SIGKILL)", xe.Signal, syscall.SIGKILL)
+	}
+	if !xe.Killed {
+		t.Error("ExitError.Killed = false, want true for a SIGKILL death")
+	}
+	if xe.Code != -1 {
+		t.Errorf("ExitError.Code = %d, want -1 (signal death, matching exec.ExitError.ExitCode() convention)", xe.Code)
+	}
+	if xe.Cause != "" {
+		t.Errorf("ExitError.Cause = %q, want empty (no Supervisor attached on this path)", xe.Cause)
+	}
+	if code != -1 {
+		t.Errorf("Wait() code = %d, want -1", code)
 	}
 }
 

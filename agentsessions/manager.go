@@ -528,24 +528,42 @@ func (m *Manager) AttachWith(ctx context.Context, id string, w io.Writer, opts A
 //
 // The returned error is the verbatim Session.Wait return value:
 //   - nil for clean exits (code == 0 with no underlying wait error).
-//   - *ExitError (extractable via errors.As) for any non-clean exit
-//     under PTY supervision. ExitError.Cause classifies
-//     supervisor-triggered kills as idle_timeout, watchdog_kill,
-//     restart_exhausted, oom_kill, or resource_limit; Cause is empty
-//     for ordinary non-zero exits or Stop/ctx-cancel under supervision
-//     (the supervisor did not trigger the termination, so it carries
-//     no cause label even though *ExitError is still returned).
-//   - The underlying wait error (typically *exec.ExitError) for non-zero
-//     exits on non-supervised sessions.
+//   - *ExitError (extractable via errors.As), for ANY non-clean exit —
+//     under supervision (any runtime kind) OR unsupervised (the default,
+//     StartOptions.Supervisor == nil; every current runtime kind's
+//     legacy waiter — PTY, streaming-stdio, jsonrpc-stdio, serve-http —
+//     builds this the same way via buildExitError). ExitError.Cause
+//     classifies supervisor-triggered kills as idle_timeout,
+//     watchdog_kill, restart_exhausted, oom_kill, or resource_limit;
+//     Cause is empty for ordinary non-zero exits or signal deaths not
+//     driven by a supervisor (including the entirely-unsupervised case,
+//     and Stop/ctx-cancel under supervision) — an empty Cause does NOT
+//     mean "no error," it means "we didn't cause it directly." Always
+//     check the returned error itself (nil vs. non-nil), never Cause,
+//     to distinguish a clean exit from an abnormal one.
 //
 // Consumers classifying terminations should errors.As(err, &xe) first;
-// branch on xe.Cause when non-empty, fall through to *exec.ExitError or
-// other underlying-error checks otherwise. Never .Error() string-match.
+// branch on xe.Cause when non-empty, fall through to xe.Code/xe.Signal
+// or Unwrap()'d underlying-error checks otherwise. Never .Error()
+// string-match.
 //
 // Behavior change vs. earlier versions: WaitSession previously discarded
 // Session.Wait's error and always returned nil on terminal state.
 // Consumers that treated err != nil as unexpected must update; the
 // terminations were always errors at the Session.Wait layer.
+//
+// Behavior change (this fix): prior to this fix, the unsupervised legacy
+// waiter path (StartOptions.Supervisor == nil, the default and — for
+// direct agentkit consumers today — the only path any real CLI session
+// actually exercises) returned a nil error from Session.Wait() for the
+// large majority of abnormal exits, including any signal death (e.g. an
+// external SIGKILL): cmd.Wait()'s *exec.ExitError case stored the
+// numeric code but never populated the returned error, so a killed
+// process looked identical to a clean exit to any errors.As(err, &xe)
+// classifier. Consumers that relied on "nil error from Wait() /
+// WaitSession() means clean exit" under the unsupervised path must
+// re-verify that assumption: a real, correctly-populated *ExitError is
+// now returned instead.
 //
 // WaitSession returns on terminal state regardless of attach subscribers
 // — drain ordering is the consumer's problem. Subscribers see EOF

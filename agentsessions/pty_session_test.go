@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -289,6 +290,82 @@ func TestPTYRuntime_SendInputAfterStop_ReturnsCleanError(t *testing.T) {
 	err = sess.SendInput(context.Background(), []byte("after-stop"))
 	if !errors.Is(err, ErrNoInputChannel) {
 		t.Errorf("SendInput after Stop = %v, want ErrNoInputChannel", err)
+	}
+}
+
+// TestPTYRuntime_ExternalSigkill_SurfacesExitError is the PTY-runtime
+// counterpart of TestStreamingStdioSession_ExternalSigkill_
+// SurfacesExitError (streaming_stdio_session_test.go). ptySession.
+// spawnWaiterLegacy is its own independent copy of the exact same
+// unsupervised-waiter shape (this file predates the stdio runtimes, so
+// it carried the identical bug on its own, not by inheritance). See that
+// test's doc comment for the full rationale. Note
+// TestPTYRuntime_SendInputAfterStop_ReturnsCleanError (above) already
+// carried a comment presuming a SIGTERM-killed process reports a
+// non-nil Wait() error — that comment described the intended, but
+// pre-fix NOT actual, behavior; that test never asserted on the value,
+// so it silently didn't catch this. This test asserts on the value.
+func TestPTYRuntime_ExternalSigkill_SurfacesExitError(t *testing.T) {
+	dir := t.TempDir()
+	script := writePTYEchoScript(t, dir)
+
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{
+		ID:      "pty-sigkill",
+		Kind:    "cli",
+		Adapter: &ptyEchoAdapter{scriptPath: script},
+		Caps:    Capabilities{PTY: true, BinaryRequired: true},
+	})
+	if err != nil {
+		t.Fatalf("NewFromAdapter: %v", err)
+	}
+
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir: dir,
+		LogPath: filepath.Join(dir, "session.log"),
+		// StartOptions.Supervisor intentionally left nil — targets the
+		// unsupervised legacy waiter.
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sess.Stop(context.Background()) }()
+
+	reporter, ok := sess.(PIDReporter)
+	if !ok {
+		t.Fatal("session does not implement PIDReporter")
+	}
+	pid := reporter.LivePID()
+	if pid == 0 {
+		t.Fatal("LivePID = 0 after Start")
+	}
+
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("syscall.Kill(%d, SIGKILL): %v", pid, err)
+	}
+
+	code, waitErr := sess.Wait()
+	if waitErr == nil {
+		t.Fatal("Wait() returned a nil error for a SIGKILL'd process — legacy-waiter regression")
+	}
+
+	var xe *ExitError
+	if !errors.As(waitErr, &xe) {
+		t.Fatalf("Wait() error = %v (%T), want errors.As-extractable *ExitError", waitErr, waitErr)
+	}
+	if xe.Signal != int(syscall.SIGKILL) {
+		t.Errorf("ExitError.Signal = %d, want %d (SIGKILL)", xe.Signal, syscall.SIGKILL)
+	}
+	if !xe.Killed {
+		t.Error("ExitError.Killed = false, want true for a SIGKILL death")
+	}
+	if xe.Code != -1 {
+		t.Errorf("ExitError.Code = %d, want -1", xe.Code)
+	}
+	if xe.Cause != "" {
+		t.Errorf("ExitError.Cause = %q, want empty (no Supervisor attached on this path)", xe.Cause)
+	}
+	if code != -1 {
+		t.Errorf("Wait() code = %d, want -1", code)
 	}
 }
 
