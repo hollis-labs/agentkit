@@ -4,6 +4,64 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.1 — 2026-08-25
+
+### Fixed — build and lint hygiene only; no API or behavioral change
+
+**Nothing in this release changes what agentkit does.** Every exported
+signature, every runtime behavior, and every documented contract is what
+v0.5.0 shipped. Consumers can bump the pin without reading further — the rest
+of this entry is about the repository's own CI gate, which had never once
+passed.
+
+Every `check` workflow run in GitHub's retained history was a failure, going
+back to the initial v0.1.0 release commit. The gate failed at its first step,
+`go fmt (verify)`, and so never reached a single step after it.
+`agentlaunch/bootassembly_test.go` had been left unformatted by the
+`RenderFrontEnd` → `MissingPolicy` rename documented under v0.3.0 below: the
+replacement field name `OnMissing` is longer than the `FrontEnd` it replaced,
+which changed gofmt's required key alignment in six struct literals, and gofmt
+was never re-run afterward. The file is reformatted here; that part of the
+diff is whitespace only.
+
+Because gofmt gated everything behind it, `golangci-lint` had never executed
+in CI at all, and its findings had been accumulating unseen since May. The
+linter was also pinned to v2.1.6 — a binary built against a Go older than this
+module's `go 1.26.1` directive, which would have refused to load its own
+configuration had it ever been reached. That pin is now v2.13.1, so the second
+gate works as well as the first.
+
+With both gates actually running, golangci-lint reported 23 findings: 19
+visible, plus 4 more hidden behind golangci-lint's default `max-same-issues: 3`
+output cap. All 23 are fixed in code — seven unchecked `Close`/`Remove` returns
+turned into explicit discards, fourteen staticcheck simplifications (De Morgan
+rewrites, a tagged switch in `tokenizeJSONPath`, `fmt.Fprintf` in place of
+`Write([]byte(fmt.Sprintf(...)))`, a merged conditional assignment, and the
+removal of five `runtime.GOOS == "windows"` guards that are dead under their
+own files' `//go:build !windows` constraint), one dead assignment in
+`DefaultRenderer.Render`, and one unreferenced helper. Each edit is
+semantically neutral, and no `.golangci.yml` was added: the gate is repaired by
+making the code pass, not by configuring the linter not to fail.
+
+`go.mod` and `go.sum` are untouched by this release.
+
+### Verification
+
+- `gofmt -l .` — clean. `go vet ./...` — clean.
+- `golangci-lint run --max-same-issues=0 --max-issues-per-linter=0` — `0 issues.`
+  The uncapped flags matter here: golangci-lint's default cap concealed four
+  real findings, so a capped-clean run is not the same thing as a clean one.
+- `go test -race -count=1 ./...` — green across every package except the
+  pre-existing, environment-linked `agentlaunch/parity.TestParity_LiveCatalog`
+  failure, whose output is unchanged from before this release: the live
+  `~/.tether/catalog` entry for `hollislabs-web-writer-claude` still resolves
+  `work_dir` to `sites/hollis-labs.com` where the directory is now
+  `sites/hollislabs-web`. That is drift in the developer host's catalog, not an
+  agentkit defect, and the test skips when no catalog is present — as on CI.
+- CI run 32903208117 is the first green `check` run in this repository's
+  history. Every step passes, with `golangci-lint found no issues` at v2.13.1
+  and `No vulnerabilities found.` from govulncheck under the runner's go1.27.0.
+
 ## v0.5.0 — 2026-08-21
 
 ### Fixed — BEHAVIORAL CHANGE, not just a bug fix — read before bumping your pin
