@@ -199,7 +199,7 @@ func TestStartOptions_ExtraFiles_PassesThroughToRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer readEnd.Close()
+	defer func() { _ = readEnd.Close() }()
 
 	if _, err := writeEnd.WriteString("fd3-through-runner\n"); err != nil {
 		t.Fatalf("write pipe: %v", err)
@@ -259,7 +259,7 @@ func TestStartOptions_ExtraFiles_WithSandboxProfile_PreservesFDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	defer readEnd.Close()
+	defer func() { _ = readEnd.Close() }()
 
 	if _, err := writeEnd.WriteString("fd3-through-sandbox\n"); err != nil {
 		t.Fatalf("write pipe: %v", err)

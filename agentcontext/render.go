@@ -134,7 +134,6 @@ func (DefaultRenderer) Render(slots []SlotResult, limits Limits) (string, Limits
 		buf.WriteString(slotBuf.String()[:headerOnlyLen])
 		buf.WriteString(s.Content[:availBytes])
 		applied.TruncatedSlots = append(applied.TruncatedSlots, s.Name)
-		isFirst = false
 		// After a truncation, any further slot would overflow; drop
 		// the rest.
 		if i+1 < len(slots) {

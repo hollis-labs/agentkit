@@ -354,7 +354,7 @@ func (s *serveHTTPSession) createSession(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("agentsessions: create serve-http session: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("agentsessions: create serve-http session: status %d: %s", resp.StatusCode, string(body))
@@ -402,7 +402,7 @@ func (s *serveHTTPSession) runEventStream() {
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var data bytes.Buffer
@@ -639,7 +639,7 @@ func (s *serveHTTPSession) SendInput(ctx context.Context, data []byte) error {
 		s.markTurnDone()
 		return fmt.Errorf("agentsessions: serve-http send input: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		s.markTurnDone()

@@ -111,7 +111,7 @@ func (r *jsonRpcStdioRuntime) Start(ctx context.Context, opts StartOptions) (Ses
 	}
 
 	if opts.AutoFireFirstTurn && len(opts.FirstTurnPayload) > 0 {
-		if !(opts.BootMode == "stdin" && opts.BootPrompt != "") {
+		if opts.BootMode != "stdin" || opts.BootPrompt == "" {
 			if err := s.SendInput(ctx, opts.FirstTurnPayload); err != nil {
 				_ = s.Stop(ctx)
 				return nil, fmt.Errorf("agentsessions: auto-fire first turn: %w", err)

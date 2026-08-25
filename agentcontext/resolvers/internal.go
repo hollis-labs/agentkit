@@ -81,22 +81,6 @@ func hashContent(content string) string {
 // clock in tests without exposing a public test seam.
 var nowUTC = func() time.Time { return time.Now().UTC() }
 
-// minDuration returns the smaller of two durations. Zero values are
-// treated as "no constraint" — that is, minDuration(0, x) returns x
-// and minDuration(x, 0) returns x. minDuration(0, 0) returns 0.
-func minDuration(a, b time.Duration) time.Duration {
-	switch {
-	case a == 0:
-		return b
-	case b == 0:
-		return a
-	case a < b:
-		return a
-	default:
-		return b
-	}
-}
-
 // firstWord returns the first whitespace-separated token of s, or s
 // itself if it contains no whitespace. Used to compose a compact
 // Provenance.Source label for the cmd resolver

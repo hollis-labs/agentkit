@@ -113,7 +113,7 @@ func (r *streamingStdioRuntime) Start(ctx context.Context, opts StartOptions) (S
 	if opts.AutoFireFirstTurn && len(opts.FirstTurnPayload) > 0 {
 		// Skip when the boot-prompt-on-stdin convention already wrote a
 		// kickoff during spawnAttempt(0).
-		if !(opts.BootMode == "stdin" && opts.BootPrompt != "") {
+		if opts.BootMode != "stdin" || opts.BootPrompt == "" {
 			if err := s.SendInput(ctx, opts.FirstTurnPayload); err != nil {
 				_ = s.Stop(ctx)
 				return nil, fmt.Errorf("agentsessions: auto-fire first turn: %w", err)

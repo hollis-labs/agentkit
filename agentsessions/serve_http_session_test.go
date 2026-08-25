@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,9 +20,6 @@ import (
 
 func writeServeHTTPFakeBinary(t *testing.T, dir string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
 	path := filepath.Join(dir, "fake-opencode-serve.sh")
 	body := `#!/bin/sh
 printf 'opencode server listening on %s\n' "$TEST_SERVER_URL"

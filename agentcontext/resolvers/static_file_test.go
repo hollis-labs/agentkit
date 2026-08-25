@@ -82,11 +82,11 @@ func TestStaticFileResolver_TildeExpansion(t *testing.T) {
 	if err != nil {
 		t.Skipf("cannot create temp in HOME (%s): %v", home, err)
 	}
-	t.Cleanup(func() { os.Remove(tmp.Name()) })
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 	if _, err := tmp.WriteString("tilde-body"); err != nil {
 		t.Fatalf("write tmp: %v", err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 
 	rel := strings.TrimPrefix(tmp.Name(), home)
 	if !strings.HasPrefix(rel, string(filepath.Separator)) {

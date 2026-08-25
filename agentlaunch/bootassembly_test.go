@@ -75,8 +75,8 @@ func TestAssemblySpecValidateRejectsMalformedTemplate(t *testing.T) {
 func TestRenderDeterministic(t *testing.T) {
 	a := sampleAssembly()
 	req := RenderRequest{
-		Inputs:   map[string]any{"ticket": "CW-20260517-0026"},
-		Vars:     map[string]any{"role_summary": "Backend engineer."},
+		Inputs:    map[string]any{"ticket": "CW-20260517-0026"},
+		Vars:      map[string]any{"role_summary": "Backend engineer."},
 		OnMissing: PolicyError,
 	}
 	first, err := a.Render(req)
@@ -104,8 +104,8 @@ func TestRenderDeterministic(t *testing.T) {
 func TestRenderSuppliedInputOverridesDefault(t *testing.T) {
 	a := sampleAssembly()
 	res, err := a.Render(RenderRequest{
-		Inputs:   map[string]any{"ticket": "CW-1", "role": "frontend", "verbose": true},
-		Vars:     map[string]any{"role_summary": "x"},
+		Inputs:    map[string]any{"ticket": "CW-1", "role": "frontend", "verbose": true},
+		Vars:      map[string]any{"role_summary": "x"},
 		OnMissing: PolicyError,
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestRenderAutonomousErrorsOnMissingRequiredInput(t *testing.T) {
 	a := sampleAssembly()
 	res, err := a.Render(RenderRequest{
 		// ticket (required, no default) omitted.
-		Vars:     map[string]any{"role_summary": "x"},
+		Vars:      map[string]any{"role_summary": "x"},
 		OnMissing: PolicyError,
 	})
 	if !errors.Is(err, ErrAssemblyMissingRequiredInput) {
@@ -141,7 +141,7 @@ func TestRenderInteractiveCollectsMissingRequiredInput(t *testing.T) {
 	a := sampleAssembly()
 	res, err := a.Render(RenderRequest{
 		// ticket omitted.
-		Vars:     map[string]any{"role_summary": "x"},
+		Vars:      map[string]any{"role_summary": "x"},
 		OnMissing: PolicyCollect,
 	})
 	if err != nil {
@@ -239,8 +239,8 @@ func TestRenderOneSpecManyInvocations(t *testing.T) {
 	seen := make(map[string]struct{})
 	for _, inv := range invocations {
 		res, err := a.Render(RenderRequest{
-			Inputs:   inv,
-			Vars:     map[string]any{"role_summary": "s"},
+			Inputs:    inv,
+			Vars:      map[string]any{"role_summary": "s"},
 			OnMissing: PolicyError,
 		})
 		if err != nil {

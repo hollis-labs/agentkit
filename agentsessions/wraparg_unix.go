@@ -47,10 +47,7 @@ func applyResourceLimits(cmd *exec.Cmd, limits *ResourceLimits) (func(), error) 
 		return nil, fmt.Errorf("sh not found in PATH for resource-limits wrap: %w", err)
 	}
 
-	useSystemdMemory := false
-	if limits.MemoryMax > 0 && runtime.GOOS == "linux" && systemdRunUserAvailable() {
-		useSystemdMemory = true
-	}
+	useSystemdMemory := limits.MemoryMax > 0 && runtime.GOOS == "linux" && systemdRunUserAvailable()
 
 	var ulimitParts []string
 	if limits.CPUTime > 0 {

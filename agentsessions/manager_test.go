@@ -197,9 +197,8 @@ func TestManager_Attach_ReplaysAndStreams(t *testing.T) {
 
 	// Pre-attach output (goes into ring + dropped — no subscribers yet)
 	sess.emit([]byte("history-bytes\n"))
-	if !waitFor(time.Second, func() bool { return true }) {
-		// no condition; just yield
-	}
+	// no condition; just yield
+	_ = waitFor(time.Second, func() bool { return true })
 
 	out := &syncBuf{}
 	ctx, cancel := context.WithCancel(context.Background())

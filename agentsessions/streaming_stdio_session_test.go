@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,9 +41,6 @@ func (b *syncBuffer) String() string {
 // line. Used by streaming-stdio tests to drive a real long-lived child.
 func writeStreamingEchoScript(t *testing.T, dir, sessionID string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
 	path := filepath.Join(dir, "fake-streaming.sh")
 	body := "#!/bin/sh\n"
 	if sessionID != "" {

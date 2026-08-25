@@ -168,7 +168,7 @@ func (s *providerSession) SendInput(ctx context.Context, data []byte) error {
 			}
 		case llmtypes.EventError:
 			if s.opts.Fanout != nil {
-				_, _ = s.opts.Fanout.Write([]byte(fmt.Sprintf("\n[error] %s\n", ev.Error)))
+				_, _ = fmt.Fprintf(s.opts.Fanout, "\n[error] %s\n", ev.Error)
 			}
 			return errors.New(ev.Error)
 		case llmtypes.EventDone:

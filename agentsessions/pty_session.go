@@ -153,7 +153,7 @@ func (r *ptyRuntime) Start(ctx context.Context, opts StartOptions) (Session, err
 	if opts.AutoFireFirstTurn && len(opts.FirstTurnPayload) > 0 {
 		// Skip when the boot-prompt-on-stdin convention already delivered
 		// a kickoff into the PTY earlier in Start.
-		if !(opts.BootMode == "stdin" && opts.BootPrompt != "") {
+		if opts.BootMode != "stdin" || opts.BootPrompt == "" {
 			if err := s.SendInput(ctx, opts.FirstTurnPayload); err != nil {
 				_ = s.Stop(ctx)
 				return nil, fmt.Errorf("agentsessions: auto-fire first turn: %w", err)

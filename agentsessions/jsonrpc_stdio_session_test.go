@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,9 +28,6 @@ import (
 // when the test method contains the literal substring "boom".
 func writeJsonRpcEchoScript(t *testing.T, dir string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
 	path := filepath.Join(dir, "fake-jsonrpc.sh")
 	body := `#!/bin/sh
 printf '%s\n' '{"jsonrpc":"2.0","method":"server.ready","params":{"port":0}}'
@@ -435,9 +431,6 @@ func TestJsonRpcStdioSession_StopUnblocksPendingCall(t *testing.T) {
 //     it (the pre-fix deadlock).
 func writeJsonRpcServerRequestScript(t *testing.T, dir string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
 	path := filepath.Join(dir, "fake-jsonrpc-server-request.sh")
 	body := `#!/bin/sh
 printf '%s\n' '{"jsonrpc":"2.0","id":"srv-1","method":"tool/approval","params":{"tool":"write_file"}}'

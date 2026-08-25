@@ -20,7 +20,7 @@ func TestDefaultRendererInputOrder(t *testing.T) {
 	if zIdx < 0 || aIdx < 0 || mIdx < 0 {
 		t.Fatalf("missing body in output: %q", out)
 	}
-	if !(zIdx < aIdx && aIdx < mIdx) {
+	if zIdx >= aIdx || aIdx >= mIdx {
 		t.Fatalf("expected input order (z, a, m); got positions z=%d a=%d m=%d in %q", zIdx, aIdx, mIdx, out)
 	}
 }

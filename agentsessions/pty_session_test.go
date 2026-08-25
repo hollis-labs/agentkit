@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -58,9 +57,6 @@ func (a *ptyEchoAdapter) ParseLineEvents(line []byte) ([]pevents.Event, error) {
 // Exits 0 on EOF.
 func writePTYEchoScript(t *testing.T, dir string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
 	path := filepath.Join(dir, "pty-echo.sh")
 	body := `#!/bin/sh
 while IFS= read -r line; do

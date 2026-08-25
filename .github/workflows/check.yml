@@ -30,7 +30,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.6
+          version: v2.13.1
 
       - name: go test -race
         run: go test -race -count=1 ./...

@@ -207,6 +207,15 @@ type jsonPathToken struct {
 	isIndex bool
 }
 
+// isJSONPathIdentByte reports whether ch may appear inside a bare
+// JSON-path identifier segment: ASCII letters, digits, '_' and '-'.
+func isJSONPathIdentByte(ch byte) bool {
+	return ch == '_' || ch == '-' ||
+		(ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9')
+}
+
 // tokenizeJSONPath parses the subset described on HTTPJSONResolver's
 // godoc. Rejects unsupported syntax up front so a typo'd expression
 // fails loudly.
@@ -216,10 +225,10 @@ func tokenizeJSONPath(p string) ([]jsonPathToken, error) {
 		i      = 0
 	)
 	for i < len(p) {
-		switch c := p[i]; {
-		case c == '.':
+		switch c := p[i]; c {
+		case '.':
 			i++
-		case c == '[':
+		case '[':
 			// numeric index up to matching ']'
 			j := strings.IndexByte(p[i+1:], ']')
 			if j < 0 {
@@ -240,10 +249,7 @@ func tokenizeJSONPath(p string) ([]jsonPathToken, error) {
 				if ch == '.' || ch == '[' {
 					break
 				}
-				if !(ch == '_' || ch == '-' ||
-					(ch >= 'a' && ch <= 'z') ||
-					(ch >= 'A' && ch <= 'Z') ||
-					(ch >= '0' && ch <= '9')) {
+				if !isJSONPathIdentByte(ch) {
 					return nil, fmt.Errorf("%w: unsupported char %q in %q", agentcontext.ErrJSONPathNotFound, string(ch), p)
 				}
 				j++
