@@ -151,6 +151,16 @@ type Report struct {
 	// so StaleExpected can report registry entries the run never observed.
 	effExpectedDiffs     []ExpectedDiff
 	effExpectedOldErrors map[string]string
+
+	// callerDiffKeys / callerOldErrKeys record which effective entries came
+	// from the caller's WithExpectedDiffs / WithExpectedOldErrors rather
+	// than from this package's built-in registries, so StaleExpectedCaller
+	// and StaleExpectedBuiltin can tell a consumer which stale entries are
+	// theirs to remove. Keyed as StaleExpected reports them: "launch/field"
+	// for diffs, launch for old errors. An entry registered on both sides
+	// counts as the caller's — they have one to delete either way.
+	callerDiffKeys   map[string]bool
+	callerOldErrKeys map[string]bool
 }
 
 // StaleExpected reports expected-diff / expected-old-error registry entries
@@ -190,6 +200,51 @@ func (r Report) StaleExpected() []string {
 	}
 	sort.Strings(stale)
 	return stale
+}
+
+// StaleExpectedCaller is StaleExpected narrowed to entries the CALLER
+// registered through WithExpectedDiffs / WithExpectedOldErrors — the stale
+// entries a consumer can actually act on by editing its own code.
+//
+// Assert on this rather than StaleExpected when running a corpus of your own.
+// The built-in registries are scoped to this package's Corpus and its shipped
+// fixture catalog, where their entries are load-bearing: the fixture ships
+// launches/hollislabs-web-writer-claude.yaml with no agents/web-writer.yaml
+// precisely so the expected-old-error path is exercised. A consumer whose live
+// catalog has since grown that agent sees the same entry never fire, but
+// deleting it upstream would break the fixture it exists for. That entry is
+// stale for the consumer and correct for the harness at the same time, and no
+// option can unregister a built-in — so the reporting has to separate them.
+func (r Report) StaleExpectedCaller() []string {
+	return r.filterStale(true)
+}
+
+// StaleExpectedBuiltin is StaleExpected narrowed to entries from this
+// package's own registries. For a consumer these are informational: each one
+// says a catalog defect the harness still documents has been fixed in the
+// catalog this run read. Log them; do not fail on them. They are only
+// actionable inside agentkit, and only if the shipped fixture agrees.
+func (r Report) StaleExpectedBuiltin() []string {
+	return r.filterStale(false)
+}
+
+// filterStale partitions StaleExpected by whether the caller registered the
+// entry. Provenance is keyed exactly as StaleExpected renders each entry.
+func (r Report) filterStale(wantCaller bool) []string {
+	var out []string
+	for _, e := range r.StaleExpected() {
+		key, ok := strings.CutPrefix(e, "expected-diff ")
+		fromCaller := false
+		if ok {
+			fromCaller = r.callerDiffKeys[key]
+		} else if key, ok = strings.CutPrefix(e, "expected-old-error "); ok {
+			fromCaller = r.callerOldErrKeys[key]
+		}
+		if fromCaller == wantCaller {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Passed reports whether every case in the corpus is a clean parity pass.
@@ -580,11 +635,25 @@ func RunParity(catalogRoot, specsRoot string, opts ...Option) (Report, error) {
 		expOldErr[k] = v
 	}
 
+	callerDiffKeys := map[string]bool{}
+	for _, e := range cfg.extraExpectedDiffs {
+		if e.Launch == "" {
+			continue // wildcard entry — StaleExpected cannot key-check it either
+		}
+		callerDiffKeys[e.Launch+"/"+e.Field] = true
+	}
+	callerOldErrKeys := map[string]bool{}
+	for launch := range cfg.extraExpectedOldErr {
+		callerOldErrKeys[launch] = true
+	}
+
 	report := Report{
 		CatalogRoot:          catalogRoot,
 		SpecsRoot:            specsRoot,
 		effExpectedDiffs:     expDiffs,
 		effExpectedOldErrors: expOldErr,
+		callerDiffKeys:       callerDiffKeys,
+		callerOldErrKeys:     callerOldErrKeys,
 	}
 
 	// --- Old side setup: load the live catalog (read-only). ---

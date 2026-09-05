@@ -162,6 +162,97 @@ func TestParity_RunOptions(t *testing.T) {
 	}
 }
 
+// TestParity_StaleExpectedProvenance pins the split between stale entries a
+// consumer registered and stale entries this package did. Without it a
+// consumer whose catalog has outgrown a built-in registration has no way to
+// assert on its own registry: the built-in cannot be unregistered, and
+// deleting it here would break the fixture that depends on it.
+func TestParity_StaleExpectedProvenance(t *testing.T) {
+	catalogRoot := filepath.Join(callerDir(t), "testdata", "catalog")
+
+	// A corpus that excludes hollislabs-web-writer-claude leaves the
+	// built-in expected-old-error unfired, and a caller entry for a
+	// cleanly-resolving launch unfired too. Both are stale; they differ
+	// only in who can do anything about it.
+	report, err := RunParity(catalogRoot, specsRoot(t),
+		WithCorpus([]CorpusEntry{{BagFile: "tether-claude", LegacyID: "tether-claude"}}),
+		WithExpectedOldErrors(map[string]string{"tether-claude": "bogus — tether-claude resolves fine"}),
+	)
+	if err != nil {
+		t.Fatalf("RunParity: %v", err)
+	}
+
+	caller := report.StaleExpectedCaller()
+	builtin := report.StaleExpectedBuiltin()
+
+	if !contains(caller, "expected-old-error tether-claude") {
+		t.Errorf("caller-registered stale entry missing from StaleExpectedCaller: %v", caller)
+	}
+	if contains(builtin, "expected-old-error tether-claude") {
+		t.Errorf("caller-registered entry leaked into StaleExpectedBuiltin: %v", builtin)
+	}
+	if !contains(builtin, "expected-old-error hollislabs-web-writer-claude") {
+		t.Errorf("built-in stale entry missing from StaleExpectedBuiltin: %v", builtin)
+	}
+	if contains(caller, "expected-old-error hollislabs-web-writer-claude") {
+		t.Errorf("built-in entry leaked into StaleExpectedCaller: %v", caller)
+	}
+
+	// The two views must partition StaleExpected exactly — no entry lost,
+	// none double-counted.
+	if got, want := len(caller)+len(builtin), len(report.StaleExpected()); got != want {
+		t.Errorf("caller(%d) + builtin(%d) = %d, want StaleExpected len %d\n  caller=%v\n  builtin=%v\n  all=%v",
+			len(caller), len(builtin), got, want, caller, builtin, report.StaleExpected())
+	}
+
+	// An entry registered on BOTH sides counts as the caller's: they have
+	// one to delete, and reporting it as unactionable would be wrong.
+	both, err := RunParity(catalogRoot, specsRoot(t),
+		WithCorpus([]CorpusEntry{{BagFile: "tether-claude", LegacyID: "tether-claude"}}),
+		WithExpectedOldErrors(map[string]string{
+			"hollislabs-web-writer-claude": "caller re-registers what the harness already has",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("RunParity (both): %v", err)
+	}
+	if !contains(both.StaleExpectedCaller(), "expected-old-error hollislabs-web-writer-claude") {
+		t.Errorf("doubly-registered stale entry should count as the caller's: %v", both.StaleExpectedCaller())
+	}
+	if contains(both.StaleExpectedBuiltin(), "expected-old-error hollislabs-web-writer-claude") {
+		t.Errorf("doubly-registered entry should not also appear as built-in: %v", both.StaleExpectedBuiltin())
+	}
+}
+
+// TestParity_StaleExpectedCallerCleanWhenNothingRegistered guards the case a
+// consumer actually asserts on: registering nothing of your own means nothing
+// of your own can be stale, however much the built-in registry has drifted.
+func TestParity_StaleExpectedCallerCleanWhenNothingRegistered(t *testing.T) {
+	catalogRoot := filepath.Join(callerDir(t), "testdata", "catalog")
+
+	report, err := RunParity(catalogRoot, specsRoot(t),
+		WithCorpus([]CorpusEntry{{BagFile: "tether-claude", LegacyID: "tether-claude"}}),
+	)
+	if err != nil {
+		t.Fatalf("RunParity: %v", err)
+	}
+	if stale := report.StaleExpectedCaller(); len(stale) != 0 {
+		t.Errorf("StaleExpectedCaller with no caller registrations = %v, want empty", stale)
+	}
+	if stale := report.StaleExpectedBuiltin(); len(stale) == 0 {
+		t.Error("StaleExpectedBuiltin should report the built-in entries this corpus never fired")
+	}
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // TestParity_CleanCasesAreIdentical pins the launches that must show ZERO
 // field diffs — the launches with a faithful legacy counterpart. If a
 // future change introduces a divergence on one of these, this test fails

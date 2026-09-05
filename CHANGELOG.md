@@ -4,6 +4,54 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added — `Report.StaleExpectedCaller` / `Report.StaleExpectedBuiltin`
+
+`StaleExpected` reports every registered expectation the run never fired. It
+merges this package's built-in registries with the caller's, and there is no
+way to unregister a built-in — so a consumer running its own corpus could not
+assert on staleness at all once a built-in entry stopped firing against its
+catalog.
+
+That is not hypothetical. `expectedOldErrors` registers
+`hollislabs-web-writer-claude` against a missing `agents/web-writer.yaml`.
+Tether's live catalog has since grown that file, so the entry never fires
+there and `StaleExpected` reports it — correctly, and unactionably. Deleting
+the entry is not the fix either: `testdata/catalog` ships that launch with no
+`web-writer.yaml` on purpose, so removing the registration fails
+`TestParity_FixtureCorpus`. The entry is stale for the consumer and required
+here at the same time.
+
+So staleness now carries provenance:
+
+- `StaleExpectedCaller()` — entries registered through `WithExpectedDiffs` /
+  `WithExpectedOldErrors`. **This is what a consumer should assert on.**
+- `StaleExpectedBuiltin()` — entries from this package's registries.
+  Informational for a consumer: each says a catalog defect the harness still
+  documents has been fixed in the catalog that run read. Log, do not fail.
+
+An entry registered on both sides counts as the caller's — they have one to
+delete either way. The two views partition `StaleExpected` exactly.
+
+`StaleExpected` itself is unchanged, so this is additive: existing callers
+keep their current behavior, including consumers currently working around the
+problem by filtering the built-in entry out by name.
+
+### Verification
+
+- `gofmt -l .` clean; `go vet ./...` clean.
+- `golangci-lint run --max-same-issues=0 --max-issues-per-linter=0` — `0 issues.`
+- `go test ./... -count=1` — green except the pre-existing, environment-linked
+  `agentlaunch/parity.TestParity_LiveCatalog`, whose failure is byte-identical
+  before and after this change: the developer host's catalog resolves
+  `hollislabs-web-writer-claude` `work_dir` to `sites/hollis-labs.com` where the
+  bag says `sites/hollislabs-web`. Unrelated to staleness reporting, and
+  documented under v0.5.1.
+- Two new tests: `TestParity_StaleExpectedProvenance` (both directions, plus
+  the exact partition and the doubly-registered case) and
+  `TestParity_StaleExpectedCallerCleanWhenNothingRegistered`.
+
 ## v0.5.1 — 2026-08-25
 
 ### Fixed — build and lint hygiene only; no API or behavioral change

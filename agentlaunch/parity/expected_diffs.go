@@ -139,12 +139,25 @@ var expectedDiffs = []ExpectedDiff{
 // cleanly. The old-side failure is expected and documented here.
 //
 // NOTE: this built-in registry is scoped to the harness's own Corpus (the
-// 11-entry S4.4 set). A consumer running a WIDER corpus (e.g. Tether's full
-// 64-launch catalog, which surfaces more dangling-agent launches) does NOT
-// add entries here — it passes its rationales to RunParity via
-// WithExpectedOldErrors / WithExpectedDiffs, which merge with this registry
-// for that run. Report.StaleExpected then staleness-checks the merged set
-// against the run's corpus.
+// 11-entry S4.4 set) and its shipped fixture catalog. A consumer running a
+// WIDER corpus (e.g. Tether's full 64-launch catalog, which surfaces more
+// dangling-agent launches) does NOT add entries here — it passes its
+// rationales to RunParity via WithExpectedOldErrors / WithExpectedDiffs,
+// which merge with this registry for that run. Report.StaleExpected then
+// staleness-checks the merged set against the run's corpus.
+//
+// The entry below is load-bearing for the fixture and cannot be deleted:
+// testdata/catalog ships launches/hollislabs-web-writer-claude.yaml with no
+// agents/web-writer.yaml, precisely so the expected-old-error path is
+// exercised. Deleting it fails TestParity_FixtureCorpus.
+//
+// A consumer whose LIVE catalog has since grown agents/web-writer.yaml sees
+// this same entry never fire, and no option can unregister a built-in. So the
+// entry is legitimately stale for that consumer and legitimately required
+// here at the same time. That is why staleness is reported with provenance:
+// assert on Report.StaleExpectedCaller, which covers only what the consumer
+// registered and can therefore remove, and log Report.StaleExpectedBuiltin
+// rather than failing on it.
 var expectedOldErrors = map[string]string{
 	"hollislabs-web-writer-claude": "hollislabs-web-writer-dangling-agent: legacy launch references agent:web-writer with no agents/web-writer.yaml in the catalog; new bag folds it into the agent_role input",
 }
