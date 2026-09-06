@@ -46,7 +46,7 @@ func SaveManifest(targetRoot string, manifest Manifest) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
@@ -192,7 +192,7 @@ func (e *DefaultEngine) applyReconcile(ctx context.Context, req Request) (Handle
 	if err != nil {
 		return Handle{}, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	report := rp.Plan.Report
 	for _, action := range rp.Actions {
 		if err := ctx.Err(); err != nil {

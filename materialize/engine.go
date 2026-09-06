@@ -109,7 +109,7 @@ func (e *DefaultEngine) Apply(ctx context.Context, req Request) (Handle, error) 
 	if err != nil {
 		return Handle{}, err
 	}
-	defer parentRoot.Close()
+	defer func() { _ = parentRoot.Close() }()
 
 	stageBase := "." + targetBase + ".agentkit-stage-" + randomSuffix()
 	if err := parentRoot.Mkdir(stageBase, 0o700); err != nil {

@@ -273,38 +273,6 @@ func normalizeFile(file File) (File, error) {
 	return file, nil
 }
 
-func defaultAtomicWrite(path string, data []byte, mode fs.FileMode) error {
-	dir := filepath.Dir(path)
-	base := filepath.Base(path)
-	tmp, err := os.CreateTemp(dir, "."+base+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
-}
-
 // TaskBundle returns raw native files under root. The caller owns body
 // rendering; the helper pins Torque/Tether's safe task bundle planting shape.
 func TaskBundle(root string, files map[string]string) ([]agentlaunch.NativeFile, error) {

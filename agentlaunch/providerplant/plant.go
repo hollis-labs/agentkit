@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"sort"
 	"strings"
 
 	"github.com/hollis-labs/go-providers/provider"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
-	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
 	"github.com/hollis-labs/agentkit/artifact"
 	"github.com/hollis-labs/agentkit/materialize"
 )
@@ -385,26 +383,6 @@ func nativeFileRelPathByProvider(providerID string, nf agentlaunch.NativeFile) (
 	}
 }
 
-// nativeFileRelPath is retained for package-level compatibility tests and
-// custom callers that use the old matrix renderer vocabulary.
-func nativeFileRelPath(renderer matrix.BootDirRenderer, nf agentlaunch.NativeFile) (string, error) {
-	switch nf.Kind {
-	case agentlaunch.NativeFileRaw:
-		return nf.RelPath, nil
-	case agentlaunch.NativeFileSkill:
-		switch renderer {
-		case matrix.BootDirRendererClaude:
-			return ".claude/skills/" + nf.ID + ".md", nil
-		case matrix.BootDirRendererOpencode:
-			return ".opencode/skills/" + nf.ID + ".md", nil
-		default:
-			return "skills/" + nf.ID + ".md", nil
-		}
-	default:
-		return "", fmt.Errorf("%w: %q", agentlaunch.ErrUnknownNativeFileKind, nf.Kind)
-	}
-}
-
 func skillRelPath(providerID, name string) string {
 	switch strings.ToLower(providerID) {
 	case "claude":
@@ -498,8 +476,4 @@ func splitArgPattern(pattern string) []string {
 	}
 	flush()
 	return out
-}
-
-func cleanRel(rel string) string {
-	return path.Clean(strings.ReplaceAll(rel, "\\", "/"))
 }

@@ -318,54 +318,6 @@ func (m *DefaultMaterializer) resolveInputs(req MaterializeRequest) map[string]a
 	return out
 }
 
-// materializeFile resolves and writes one BootFileSpec. It returns the
-// bootdir-relative path, whether the write changed the file, and the slot
-// ref rendered (empty when the object was not a slot).
-func (m *DefaultMaterializer) materializeFile(
-	ctx context.Context,
-	bootRoot string,
-	spec *BootSpec,
-	f BootFileSpec,
-	inputs map[string]any,
-	renderer ContractRenderer,
-) (rel string, written bool, slotRendered string, err error) {
-	content, slot, rerr := m.renderObject(ctx, spec, f.Object, inputs, renderer)
-	if rerr != nil {
-		return "", false, "", fmt.Errorf("agentlaunch: materialize file %q: %w", f.ID, rerr)
-	}
-	written, werr := m.writeSafe(bootRoot, f.RelPath, content, f.Mode)
-	if werr != nil {
-		return "", false, "", fmt.Errorf("agentlaunch: materialize file %q: %w", f.ID, werr)
-	}
-	return f.RelPath, written, slot, nil
-}
-
-// materializeInjection resolves and writes one BootInjectionSpec. Skill
-// injections route to the provider-native skill directory derived from the
-// BootSpec runtime binding; raw injections write verbatim at RelPath.
-func (m *DefaultMaterializer) materializeInjection(
-	ctx context.Context,
-	bootRoot string,
-	spec *BootSpec,
-	inj BootInjectionSpec,
-	inputs map[string]any,
-	renderer ContractRenderer,
-) (rel string, written bool, slotRendered string, err error) {
-	content, slot, rerr := m.renderObject(ctx, spec, inj.Object, inputs, renderer)
-	if rerr != nil {
-		return "", false, "", fmt.Errorf("agentlaunch: materialize injection %q: %w", inj.ID, rerr)
-	}
-	relPath, perr := injectionRelPath(spec.Runtime, inj)
-	if perr != nil {
-		return "", false, "", fmt.Errorf("agentlaunch: materialize injection %q: %w", inj.ID, perr)
-	}
-	written, werr := m.writeSafe(bootRoot, relPath, content, inj.Mode)
-	if werr != nil {
-		return "", false, "", fmt.Errorf("agentlaunch: materialize injection %q: %w", inj.ID, werr)
-	}
-	return relPath, written, slot, nil
-}
-
 // renderObject resolves a ContractObject to its final byte content.
 //
 //   - literal: the Text field, library-resolved. Use this for opaque user
@@ -427,67 +379,6 @@ func (m *DefaultMaterializer) renderObject(
 	}
 }
 
-// writeSafe writes content at the bootdir-relative path rel inside
-// bootRoot. It is the path-safe write loop the library owns:
-//
-//   - rel is re-validated through ValidateBootDirRelPath so a spec
-//     assembled outside Validate still cannot escape the bootdir;
-//   - the joined absolute path is verified to remain inside bootRoot even
-//     after symlink-free cleaning, defending against any residual
-//     traversal;
-//   - the write is idempotent: an existing file with identical content and
-//     mode is left untouched and reported as not-written, so a re-run
-//     converges silently.
-func (m *DefaultMaterializer) writeSafe(bootRoot, rel, content string, mode os.FileMode) (bool, error) {
-	if err := ValidateBootDirRelPath(rel); err != nil {
-		return false, fmt.Errorf("%w: %s: %v", ErrMaterializeUnsafePath, rel, err)
-	}
-	if mode == 0 {
-		mode = defaultFileMode
-	}
-
-	target := filepath.Join(bootRoot, filepath.FromSlash(rel))
-	// Defence in depth: after Join+Clean the target must still be inside
-	// bootRoot. ValidateBootDirRelPath already rejects ".." segments, but
-	// re-checking the cleaned absolute path closes the loop against any
-	// platform-specific cleaning surprise.
-	if target != bootRoot &&
-		!strings.HasPrefix(target, bootRoot+string(os.PathSeparator)) {
-		return false, fmt.Errorf("%w: %s", ErrMaterializeUnsafePath, rel)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(target), m.opts.DirMode); err != nil {
-		return false, fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
-	}
-
-	// Idempotency: skip a write that would not change the file. This makes
-	// Populate a converging re-run and keeps a crash-recovery re-plant from
-	// touching mtimes needlessly.
-	if existing, err := os.ReadFile(target); err == nil {
-		if string(existing) == content {
-			if info, serr := os.Stat(target); serr == nil && info.Mode().Perm() == mode.Perm() {
-				return false, nil
-			}
-			// Content matches but mode drifted — reconcile the mode only.
-			if cerr := os.Chmod(target, mode); cerr != nil {
-				return false, fmt.Errorf("chmod %s: %w", target, cerr)
-			}
-			return true, nil
-		}
-	}
-
-	if err := os.WriteFile(target, []byte(content), mode); err != nil {
-		return false, fmt.Errorf("write %s: %w", target, err)
-	}
-	// os.WriteFile honors the mode only when it creates the file; an
-	// overwrite leaves the prior mode. Reconcile explicitly so a re-plant
-	// converges the mode too.
-	if err := os.Chmod(target, mode); err != nil {
-		return false, fmt.Errorf("chmod %s: %w", target, err)
-	}
-	return true, nil
-}
-
 // injectionRelPath resolves a BootInjectionSpec to its bootdir-relative
 // write target.
 //
@@ -511,7 +402,7 @@ func injectionRelPath(runtime RuntimeBinding, inj BootInjectionSpec) (string, er
 // skillRelPath maps a provider identity + skill name to the provider's
 // native skill-document path. Providers with no native skill directory get
 // a neutral skills/ directory for inspection parity. This mirrors the
-// providerplant.nativeFileRelPath convention so a skill planted through
+// providerplant.nativeFileRelPathByProvider convention so a skill planted through
 // the materializer lands where the harness expects it.
 func skillRelPath(provider, name string) string {
 	switch strings.ToLower(provider) {
