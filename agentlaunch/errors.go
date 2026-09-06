@@ -236,6 +236,57 @@ var (
 	// envelope names an operation the live service does not implement.
 	ErrRegistryUnsupportedOperation = errors.New("agentlaunch: registry operation is not supported")
 
+	// ErrBootstrapMissingIdentity is returned when a required bootstrap identity
+	// segment is empty.
+	ErrBootstrapMissingIdentity = errors.New("agentlaunch: bootstrap identity is missing")
+
+	// ErrBootstrapUnsafeIdentity is returned when a bootstrap identity segment is
+	// path-like, a renderer artifact alias such as current, or contains unsafe whitespace.
+	ErrBootstrapUnsafeIdentity = errors.New("agentlaunch: bootstrap identity is unsafe")
+
+	// ErrBootstrapUnknownIntent is returned when a session bootstrap request names
+	// an unknown continuity intent.
+	ErrBootstrapUnknownIntent = errors.New("agentlaunch: bootstrap intent is unknown")
+
+	// ErrBootstrapMissingPrevious is returned when resume/compact is requested
+	// without an existing bootstrap record.
+	ErrBootstrapMissingPrevious = errors.New("agentlaunch: bootstrap previous session is missing")
+
+	// ErrBootstrapUnexpectedSessionID is returned when fresh/fork launch is given
+	// a caller-supplied canonical ID instead of minting a new one.
+	ErrBootstrapUnexpectedSessionID = errors.New("agentlaunch: bootstrap unexpected session id")
+
+	// ErrBootstrapSessionCollision is returned when canonical, legacy, parent, or
+	// minted session identifiers collide.
+	ErrBootstrapSessionCollision = errors.New("agentlaunch: bootstrap session id collision")
+
+	// ErrBootstrapInvalidSessionEnvKey is returned when a bootstrap record does
+	// not use SESSION as the canonical environment key.
+	ErrBootstrapInvalidSessionEnvKey = errors.New("agentlaunch: bootstrap session env key must be SESSION")
+
+	// ErrBootstrapUnknownPublication is returned when a bootstrap record names an
+	// unknown publication choice.
+	ErrBootstrapUnknownPublication = errors.New("agentlaunch: bootstrap publication choice is unknown")
+
+	// ErrBootstrapInvalidGeneration is returned when runtime binding generation is negative.
+	ErrBootstrapInvalidGeneration = errors.New("agentlaunch: bootstrap binding generation is invalid")
+
+	// ErrBootstrapProviderMappingCollision is returned when provider-native
+	// mappings collide inside one owner scope.
+	ErrBootstrapProviderMappingCollision = errors.New("agentlaunch: bootstrap provider mapping collision")
+
+	// ErrBootstrapMissingCreatedAt is returned when a bootstrap record lacks a
+	// creation timestamp.
+	ErrBootstrapMissingCreatedAt = errors.New("agentlaunch: bootstrap created_at is missing")
+
+	// ErrDeliveryObservationUnknownStage is returned when a runtime delivery
+	// observation names an unsupported stage.
+	ErrDeliveryObservationUnknownStage = errors.New("agentlaunch: delivery observation stage is unknown")
+
+	// ErrDeliveryObservationMissingObservedAt is returned when an observation lacks
+	// an observation timestamp.
+	ErrDeliveryObservationMissingObservedAt = errors.New("agentlaunch: delivery observation observed_at is missing")
+
 	// ErrRegistryKindSchemaMismatch is returned by per-kind registration
 	// validation when a RegistrationRecord's Meta.SchemaVersion does not
 	// equal the published schema-version constant for its kind.
