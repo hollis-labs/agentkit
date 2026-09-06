@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## v0.6.0 — 2026-09-06
+
+### Shared materialization and canonical bootstrap
+
+- Add neutral artifact trees, bounded filesystem/immutable sources,
+  provenance and ownership metadata, and preservation of executable modes,
+  binary content and empty directories.
+- Add safe materialization, owned reconciliation and managed-document merges;
+  extract reusable authored-recipe composition and document assembly.
+- Add prepared execution with exact argv/env/cwd and independent project,
+  boot, state and scratch roots. Legacy planting entry points delegate to
+  the shared engine; session runtimes carry required sandbox policy.
+- Add offline canonical session/bootstrap contracts, optional durable actors,
+  provider-native ID mappings, lineage, publication and trace/work references.
+- Update shared dependencies to go-providers v0.26.0, go-sandbox v0.3.0
+  and go-runner v0.7.0.
+
 ### Added — `Report.StaleExpectedCaller` / `Report.StaleExpectedBuiltin`
 
 `StaleExpected` reports every registered expectation the run never fired. It
