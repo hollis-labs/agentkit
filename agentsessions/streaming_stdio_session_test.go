@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,125 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	llmtypes "github.com/hollis-labs/go-llm-types"
 )
+
+type gatedStdoutReader struct {
+	io.ReadCloser
+	ready <-chan struct{}
+}
+
+func (r gatedStdoutReader) Read(p []byte) (int, error) {
+	<-r.ready
+	return r.ReadCloser.Read(p)
+}
+
+func TestStreamingStdioSession_DrainBoundsInheritedPipe(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close(); _ = writer.Close() }()
+	readerDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, reader)
+		close(readerDone)
+	}()
+	finished := make(chan struct{})
+	go func() {
+		drainStreamingStdout(reader, readerDone)
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain blocked on inherited stdout writer")
+	}
+}
+
+// Force the child to exit before its stdout reader gets scheduled. Both
+// lifecycle paths must preserve buffered terminal events after process exit.
+func TestStreamingStdioSession_DrainAfterFastExit(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		name := "legacy"
+		if supervised {
+			name = "supervised"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			adapter := &echoAdapter{script: writeTestScript(t, dir, []string{"done"})}
+			logFile, err := os.Create(filepath.Join(dir, "session.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = logFile.Close() }()
+			fanout := make(chan llmtypes.StreamEvent, 1)
+			s := &streamingStdioSession{
+				runtime: &streamingStdioRuntime{cfg: AdapterRuntimeConfig{ID: name}},
+				adapter: adapter,
+				opts:    StartOptions{Workdir: dir, EventFanout: fanout},
+				logFile: logFile, done: make(chan error, 1),
+				copyDone: make(chan struct{}), stopRequested: make(chan struct{}),
+			}
+			cmd, stdin, stdout, cleanup, err := s.spawnAttempt(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+			ready := make(chan struct{})
+			var release sync.Once
+			defer release.Do(func() { close(ready) })
+			gated := gatedStdoutReader{ReadCloser: stdout, ready: ready}
+			finished := make(chan error, 1)
+			if supervised {
+				s.opts.Supervisor = &SupervisorOptions{}
+				go func() {
+					exit := s.waitOnceSupervised(context.Background(), cmd, stdin, gated, 0)
+					if exit != nil {
+						finished <- exit
+					} else {
+						finished <- nil
+					}
+				}()
+			} else {
+				s.spawnReaderLegacy(gated)
+				s.spawnWaiterLegacy(cmd, stdin, gated)
+				go func() { _, err := s.Wait(); finished <- err }()
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				s.ioLock.Lock()
+				reaped := s.stdin == nil
+				s.ioLock.Unlock()
+				if reaped {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("child was not reaped")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			release.Do(func() { close(ready) })
+			select {
+			case err := <-finished:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("wait did not finish")
+			}
+			select {
+			case ev := <-fanout:
+				if ev.Type != llmtypes.EventDone {
+					t.Fatalf("event = %v, want done", ev)
+				}
+			default:
+				t.Fatal("terminal event lost after child exit")
+			}
+		})
+	}
+}
 
 // syncBuffer is a thread-safe bytes.Buffer wrapper for fanout in tests.
 // The reader goroutine writes to it concurrently with the test goroutine

@@ -275,21 +275,26 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Own stdout ourselves: exec.Cmd.Wait closes StdoutPipe immediately on
+	// exit, racing the reader and discarding buffered final events.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		limitCleanup()
 		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stdout pipe: %w", err)
 	}
+	cmd.Stdout = stdoutWriter
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
+		_ = stdoutWriter.Close()
 		limitCleanup()
 		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: start: %w", err)
 	}
+	_ = stdoutWriter.Close() // only the child retains the write end
 
 	s.reportSandboxOutcome(sandboxOutcome)
 
@@ -389,9 +394,19 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 	}
 }
 
-// spawnWaiterLegacy is the single-shot waiter: blocks on cmd.Wait, closes
-// pipes (which unblocks the reader), records terminal state, signals
-// s.done.
+// drainStreamingStdout preserves buffered output after child exit, while
+// bounding a descendant that inherited stdout and keeps the pipe open. An
+// ordinary child closes its write end on exit, so draining finishes at EOF
+// without waiting for the timeout.
+func drainStreamingStdout(stdout io.ReadCloser, readerDone <-chan struct{}) {
+	timer := time.AfterFunc(time.Second, func() { _ = stdout.Close() })
+	<-readerDone
+	timer.Stop()
+	_ = stdout.Close()
+}
+
+// spawnWaiterLegacy waits for the child, drains stdout, records terminal
+// state, then signals s.done.
 func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser) {
 	go func() {
 		err := cmd.Wait()
@@ -412,8 +427,7 @@ func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteC
 		s.ioLock.Unlock()
 
 		_ = stdin.Close()
-		_ = stdout.Close()
-		<-s.copyDone
+		drainStreamingStdout(stdout, s.copyDone)
 		_ = s.logFile.Close()
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
@@ -597,8 +611,7 @@ func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exe
 	s.stdout = nil
 	s.ioLock.Unlock()
 	_ = stdin.Close()
-	_ = stdout.Close()
-	<-readerDone
+	drainStreamingStdout(stdout, readerDone)
 
 	_ = attempt
 	return buildExitError(cmd.ProcessState, waitErr, cause.getCause())

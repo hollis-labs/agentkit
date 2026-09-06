@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## v0.6.1 — 2026-09-06
+
+- Preserve buffered streaming-stdio events when a child exits before its
+  reader runs, for both supervised and single-shot lifecycles. Own stdout
+  independently of `exec.Cmd.Wait` and allow a bounded one-second drain for
+  descendants that inherit the output pipe.
+- Add deterministic regression coverage that delays the reader until the
+  child has exited.
+
 ## v0.6.0 — 2026-09-06
 
 ### Shared materialization and canonical bootstrap
