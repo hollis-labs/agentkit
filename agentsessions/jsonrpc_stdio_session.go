@@ -19,7 +19,6 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/go-sandbox/sandbox"
 )
 
 // jsonRpcStdioRuntime is the agentsessions.Runtime backed by a long-lived
@@ -55,6 +54,11 @@ func (r *jsonRpcStdioRuntime) Prepare(_ context.Context) error {
 }
 
 func (r *jsonRpcStdioRuntime) Start(ctx context.Context, opts StartOptions) (Session, error) {
+	var err error
+	opts, err = normalizeStartOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Workdir == "" {
 		return nil, errors.New("agentsessions: StartOptions.Workdir is required for jsonrpc-stdio runtime")
 	}
@@ -186,6 +190,8 @@ type jsonRpcStdioSession struct {
 	// diagnostic. Zero before the first attempt.
 	spawnedAt atomic.Int64
 
+	sandboxOutcome atomic.Value // SandboxOutcome
+
 	lastSessionID atomic.Value // string
 
 	activity activityTracker
@@ -204,6 +210,18 @@ type jsonRpcStdioSession struct {
 	nextID  atomic.Int64
 	pendMu  sync.Mutex
 	pending map[int64]chan jsonRpcResponse
+}
+
+func (s *jsonRpcStdioSession) SandboxOutcome() (SandboxOutcome, bool) {
+	out, ok := s.sandboxOutcome.Load().(SandboxOutcome)
+	return out, ok
+}
+
+func (s *jsonRpcStdioSession) reportSandboxOutcome(out SandboxOutcome) {
+	s.sandboxOutcome.Store(out)
+	if s.opts.SandboxOutcomeCallback != nil {
+		s.opts.SandboxOutcomeCallback(out)
+	}
 }
 
 func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCloser, io.ReadCloser, func(), error) {
@@ -231,10 +249,8 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204
 	configureCommandProcessGroup(cmd)
 	cmd.Dir = s.opts.Workdir
-	if len(s.opts.Env) > 0 {
+	if s.opts.Env != nil {
 		cmd.Env = s.opts.Env
-	} else {
-		cmd.Env = os.Environ()
 	}
 	if len(s.opts.ExtraFiles) > 0 {
 		cmd.ExtraFiles = s.opts.ExtraFiles
@@ -245,38 +261,28 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 		cmd.Stderr = s.logFile
 	}
 
-	var sandboxCleanup func()
-	if s.opts.Profile.ID != "" {
-		cleanup, err := sandbox.Apply(cmd, s.opts.Profile, s.opts.Workdir)
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("agentsessions: sandbox apply: %w", err)
-		}
-		sandboxCleanup = cleanup
+	sandboxOutcome, sandboxCleanup, err := prepareSandboxForCommand(cmd, s.opts)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
 	limitCleanup, err := applyResourceLimits(cmd, s.opts.ResourceLimits)
 	if err != nil {
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: apply resource limits: %w", err)
 	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		limitCleanup()
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
 		limitCleanup()
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stdout pipe: %w", err)
 	}
 
@@ -284,11 +290,11 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 		_ = stdin.Close()
 		_ = stdout.Close()
 		limitCleanup()
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: start: %w", err)
 	}
+
+	s.reportSandboxOutcome(sandboxOutcome)
 
 	s.ioLock.Lock()
 	s.cmd = cmd

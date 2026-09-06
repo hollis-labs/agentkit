@@ -23,7 +23,6 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
-	"github.com/hollis-labs/go-sandbox/sandbox"
 )
 
 const serveHTTPReadyTimeout = 10 * time.Second
@@ -52,6 +51,11 @@ func (r *serveHTTPRuntime) Prepare(_ context.Context) error {
 }
 
 func (r *serveHTTPRuntime) Start(ctx context.Context, opts StartOptions) (Session, error) {
+	var err error
+	opts, err = normalizeStartOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Workdir == "" {
 		return nil, errors.New("agentsessions: StartOptions.Workdir is required for serve-http runtime")
 	}
@@ -182,6 +186,8 @@ type serveHTTPSession struct {
 	startedPID atomic.Int32
 	lastPID    atomic.Int32
 
+	sandboxOutcome atomic.Value // SandboxOutcome
+
 	lastSessionID atomic.Value // string
 
 	readyURL    chan string
@@ -200,6 +206,18 @@ type serveHTTPSession struct {
 	streamCancel context.CancelFunc
 }
 
+func (s *serveHTTPSession) SandboxOutcome() (SandboxOutcome, bool) {
+	out, ok := s.sandboxOutcome.Load().(SandboxOutcome)
+	return out, ok
+}
+
+func (s *serveHTTPSession) reportSandboxOutcome(out SandboxOutcome) {
+	s.sandboxOutcome.Store(out)
+	if s.opts.SandboxOutcomeCallback != nil {
+		s.opts.SandboxOutcomeCallback(out)
+	}
+}
+
 func (s *serveHTTPSession) spawn() error {
 	binary, ok := s.adapter.Detect()
 	if !ok {
@@ -214,10 +232,8 @@ func (s *serveHTTPSession) spawn() error {
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args
 	configureCommandProcessGroup(cmd)
 	cmd.Dir = s.opts.Workdir
-	if len(s.opts.Env) > 0 {
+	if s.opts.Env != nil {
 		cmd.Env = s.opts.Env
-	} else {
-		cmd.Env = os.Environ()
 	}
 	if len(s.opts.ExtraFiles) > 0 {
 		cmd.ExtraFiles = s.opts.ExtraFiles
@@ -233,20 +249,14 @@ func (s *serveHTTPSession) spawn() error {
 		return fmt.Errorf("agentsessions: stderr pipe: %w", err)
 	}
 
-	var sandboxCleanup func()
-	if s.opts.Profile.ID != "" {
-		cleanup, err := sandbox.Apply(cmd, s.opts.Profile, s.opts.Workdir)
-		if err != nil {
-			return fmt.Errorf("agentsessions: sandbox apply: %w", err)
-		}
-		sandboxCleanup = cleanup
+	sandboxOutcome, sandboxCleanup, err := prepareSandboxForCommand(cmd, s.opts)
+	if err != nil {
+		return err
 	}
 
 	limitCleanup, err := applyResourceLimits(cmd, s.opts.ResourceLimits)
 	if err != nil {
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return fmt.Errorf("agentsessions: apply resource limits: %w", err)
 	}
 
@@ -254,11 +264,11 @@ func (s *serveHTTPSession) spawn() error {
 		_ = stdout.Close()
 		_ = stderr.Close()
 		limitCleanup()
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return fmt.Errorf("agentsessions: start: %w", err)
 	}
+
+	s.reportSandboxOutcome(sandboxOutcome)
 
 	s.cmd = cmd
 	if cmd.Process != nil {

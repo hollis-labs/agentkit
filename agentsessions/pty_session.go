@@ -20,7 +20,6 @@ import (
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	pevents "github.com/hollis-labs/go-providers/provider/events"
-	"github.com/hollis-labs/go-sandbox/sandbox"
 )
 
 // ptyRuntime is the agentsessions.Runtime backed by a long-lived PTY-spawned
@@ -60,6 +59,11 @@ func (r *ptyRuntime) Prepare(_ context.Context) error {
 }
 
 func (r *ptyRuntime) Start(ctx context.Context, opts StartOptions) (Session, error) {
+	var err error
+	opts, err = normalizeStartOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Workdir == "" {
 		return nil, errors.New("agentsessions: StartOptions.Workdir is required for pty runtime")
 	}
@@ -229,6 +233,8 @@ type ptySession struct {
 	// diagnostic. Zero before the first attempt.
 	spawnedAt atomic.Int64
 
+	sandboxOutcome atomic.Value // SandboxOutcome
+
 	// lastSessionID stores the most-recently observed provider session ID
 	// from EventSessionID. Used by the supervised restart path to feed
 	// the next BuildArgs's session-resume slot when Caps.ProviderSessionID
@@ -256,6 +262,18 @@ type ptySession struct {
 // lastPID.
 // Returns the cmd + ptmx locals (so callers can capture them) and a
 // cleanup func to invoke after cmd.Wait completes.
+func (s *ptySession) SandboxOutcome() (SandboxOutcome, bool) {
+	out, ok := s.sandboxOutcome.Load().(SandboxOutcome)
+	return out, ok
+}
+
+func (s *ptySession) reportSandboxOutcome(out SandboxOutcome) {
+	s.sandboxOutcome.Store(out)
+	if s.opts.SandboxOutcomeCallback != nil {
+		s.opts.SandboxOutcomeCallback(out)
+	}
+}
+
 func (s *ptySession) spawnAttempt(attempt int) (*exec.Cmd, *os.File, func(), error) {
 	binary, ok := s.adapter.Detect()
 	if !ok {
@@ -291,40 +309,32 @@ func (s *ptySession) spawnAttempt(attempt int) (*exec.Cmd, *os.File, func(), err
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args
 	configurePTYCommandProcessGroup(cmd)
 	cmd.Dir = s.opts.Workdir
-	if len(s.opts.Env) > 0 {
+	if s.opts.Env != nil {
 		cmd.Env = s.opts.Env
-	} else {
-		cmd.Env = os.Environ()
 	}
 	if len(s.opts.ExtraFiles) > 0 {
 		cmd.ExtraFiles = s.opts.ExtraFiles
 	}
 
-	var sandboxCleanup func()
-	if s.opts.Profile.ID != "" {
-		cleanup, err := sandbox.Apply(cmd, s.opts.Profile, s.opts.Workdir)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("agentsessions: sandbox apply: %w", err)
-		}
-		sandboxCleanup = cleanup
+	sandboxOutcome, sandboxCleanup, err := prepareSandboxForCommand(cmd, s.opts)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	limitCleanup, err := applyResourceLimits(cmd, s.opts.ResourceLimits)
 	if err != nil {
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return nil, nil, nil, fmt.Errorf("agentsessions: apply resource limits: %w", err)
 	}
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		limitCleanup()
-		if sandboxCleanup != nil {
-			sandboxCleanup()
-		}
+		sandboxCleanup()
 		return nil, nil, nil, fmt.Errorf("agentsessions: pty start: %w", err)
 	}
+
+	s.reportSandboxOutcome(sandboxOutcome)
 
 	s.ptmxLock.Lock()
 	s.cmd = cmd

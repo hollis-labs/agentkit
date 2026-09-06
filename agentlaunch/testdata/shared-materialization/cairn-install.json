@@ -1,0 +1,52 @@
+{
+  "fixture": "cairn-install",
+  "source": {
+    "app": "cairn",
+    "checkout": "/Users/chrispian/dev/projects/cairn",
+    "head": "3735a92",
+    "dirty": false,
+    "paths": [
+      "profile/resolve.go",
+      "bootdir/render.go",
+      "bootdir/layout.go",
+      "bootdir/template.go",
+      "bootdir/plant.go",
+      "install/install.go",
+      "install/write.go"
+    ]
+  },
+  "entry": "authored_recipe",
+  "recipe": {
+    "id": "synthetic-cairn-install",
+    "base": "base-engineer",
+    "parts": [
+      {"id": "filesystem-context"},
+      {"id": "managed-provider-install"}
+    ],
+    "merge_rules": [
+      {"field": "documents.sections", "kind": "append"},
+      {"field": "settings.providers", "kind": "keyed", "key": "id"}
+    ]
+  },
+  "artifacts": [
+    {"path": "AGENTS.md", "kind": "file", "mode": "0644", "group": "boot-docs"},
+    {"path": "context/tree", "kind": "directory", "mode": "0755", "group": "copied-tree"},
+    {"path": "context/tree/README.md", "kind": "file", "mode": "0644", "group": "copied-tree"},
+    {"path": ".codex/config.toml", "kind": "file", "mode": "0600", "group": "managed-install"},
+    {"path": ".agents/skills/fixture-skill/SKILL.md", "kind": "file", "mode": "0644", "group": "managed-install"},
+    {"path": ".claude/skills/fixture-skill/scripts/run.sh", "kind": "file", "mode": "0755", "group": "managed-install"}
+  ],
+  "checks": [
+    "deterministic render output",
+    "managed JSON/TOML merge preserves unowned keys",
+    "symlink, directory, nonregular, absolute and traversal destinations fail before writes"
+  ],
+  "access": {
+    "project_root": "/synthetic/cairn/project",
+    "boot_root": "/synthetic/cairn/boot",
+    "state_root": "/synthetic/cairn/state",
+    "scratch_root": "/synthetic/cairn/scratch",
+    "cwd": "/synthetic/cairn/project",
+    "mode": "required"
+  }
+}

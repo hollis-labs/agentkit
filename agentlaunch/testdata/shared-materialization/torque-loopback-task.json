@@ -1,0 +1,39 @@
+{
+  "fixture": "torque-loopback-task",
+  "source": {
+    "app": "torque",
+    "checkout": "/Users/chrispian/dev/hollis-labs/apps/torque",
+    "head": "1e33e28",
+    "dirty": false,
+    "paths": [
+      "internal/runtime/agent/boot.go",
+      "internal/runtime/agent/task_context.go",
+      "internal/runtime/agent/task_context_test.go",
+      "internal/launchprofile/assemble.go",
+      "internal/runtime/bootstrap/loopback.go"
+    ]
+  },
+  "entry": "resolved_composition",
+  "documents": [
+    {"path": "AGENTS.md", "sections": ["role", "task", "recovery"]}
+  ],
+  "artifacts": [
+    {"path": "tasks/README.md", "kind": "file", "mode": "0644", "group": "task-bundle"},
+    {"path": "tasks/CW-0000/task.md", "kind": "file", "mode": "0644", "group": "task-bundle"},
+    {"path": "tasks/CW-0000/task.json", "kind": "file", "mode": "0644", "group": "task-bundle"},
+    {"path": "tasks/CW-0000/process.md", "kind": "file", "mode": "0644", "group": "task-bundle"}
+  ],
+  "runtime_effects": [
+    {"kind": "loopback", "name": "torque_task_loopback", "required": true, "redacted": false}
+  ],
+  "checks": [
+    "single synthetic task produces exactly four task-bundle files",
+    "unsafe task id is hashed for the directory but preserved in task.json",
+    "loopback URL is recorded without requiring a task_id parameter"
+  ],
+  "access": {
+    "mode": "required",
+    "network": {"loopback": true},
+    "subprocess": {"allowed": true}
+  }
+}

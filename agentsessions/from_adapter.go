@@ -117,6 +117,11 @@ func (r *adapterRuntime) Prepare(ctx context.Context) error {
 }
 
 func (r *adapterRuntime) Start(ctx context.Context, opts StartOptions) (Session, error) {
+	var err error
+	opts, err = normalizeStartOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Workdir == "" {
 		return nil, errors.New("agentsessions: StartOptions.Workdir is required for adapter runtime")
 	}
@@ -213,6 +218,8 @@ type adapterSession struct {
 	// with the rest of this struct's fields.
 	turnSawTerminal atomic.Bool
 
+	sandboxOutcome atomic.Value // SandboxOutcome
+
 	stopCh   chan struct{}
 	stopOnce sync.Once
 
@@ -226,6 +233,18 @@ type adapterSession struct {
 	// when bypassing the Manager.
 	turnMu       sync.Mutex
 	turnInFlight atomic.Bool
+}
+
+func (s *adapterSession) SandboxOutcome() (SandboxOutcome, bool) {
+	out, ok := s.sandboxOutcome.Load().(SandboxOutcome)
+	return out, ok
+}
+
+func (s *adapterSession) reportSandboxOutcome(out SandboxOutcome) {
+	s.sandboxOutcome.Store(out)
+	if s.opts.SandboxOutcomeCallback != nil {
+		s.opts.SandboxOutcomeCallback(out)
+	}
 }
 
 func (s *adapterSession) Wait() (int, error) {
@@ -283,21 +302,32 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	}()
 
 	cfg := runner.Config{
-		Provider:   s.adapter,
-		Profile:    s.opts.Profile,
-		Workspace:  s.opts.Workdir,
-		Args:       args,
-		Env:        s.opts.Env,
-		Stderr:     s.opts.Stderr,
-		ExtraFiles: s.opts.ExtraFiles,
-		WaitDelay:  s.runtime.cfg.WaitDelay,
-		OnEvent:    s.handleRunnerEvent,
+		Provider:      s.adapter,
+		SandboxPolicy: s.opts.SandboxPolicy,
+		Profile:       s.opts.Profile,
+		Workspace:     s.opts.Workdir,
+		Args:          args,
+		Env:           s.opts.Env,
+		Stderr:        s.opts.Stderr,
+		ExtraFiles:    s.opts.ExtraFiles,
+		WaitDelay:     s.runtime.cfg.WaitDelay,
+		OnEvent:       s.handleRunnerEvent,
 	}
 	// StartOptions.Supervisor + ResourceLimits are PTY-only in v0.6.0.
 	// Forwarding them to runner.Config.Supervisor / .ResourceLimits on
 	// the adapter path remains a follow-up increment — see CHANGELOG
 	// "Out of scope".
 	err := runner.Run(runCtx, cfg)
+	if err != nil {
+		var sandboxErr *runner.SandboxError
+		if errors.As(err, &sandboxErr) {
+			s.reportSandboxOutcome(sessionSandboxOutcomeFromRunner(sandboxErr.Outcome))
+		}
+		var startErr *runner.StartError
+		if errors.As(err, &startErr) {
+			s.reportSandboxOutcome(sessionSandboxOutcomeFromRunner(startErr.Outcome))
+		}
+	}
 
 	// runner.Run has fully returned — cfg.OnEvent (handleRunnerEvent) has
 	// already observed every EventProviderEvent the adapter emitted for
@@ -355,6 +385,9 @@ func (s *adapterSession) handleRunnerEvent(ev runner.Event) {
 		if pid, ok := ev.Payload["pid"].(int); ok {
 			s.pid.Store(int32(pid))
 			s.lastPID.Store(int32(pid))
+		}
+		if out, ok := ev.Payload["sandbox"].(runner.SandboxOutcome); ok {
+			s.reportSandboxOutcome(sessionSandboxOutcomeFromRunner(out))
 		}
 	case runner.EventProviderEvent:
 		if pe, ok := ev.Payload["event"].(llmtypes.StreamEvent); ok {

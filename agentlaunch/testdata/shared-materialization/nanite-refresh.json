@@ -1,0 +1,33 @@
+{
+  "fixture": "nanite-refresh",
+  "source": {
+    "app": "nanite",
+    "checkout": "/Users/chrispian/dev/hollis-labs/apps/nanite",
+    "head": "c56aad70",
+    "dirty": false,
+    "paths": [
+      "internal/runtime/agent/bootdir.go",
+      "internal/runtime/agent/bootdir_plant.go",
+      "internal/runtime/agent/bootdir_provider_config.go",
+      "internal/runtime/agent/sandbox_content_claude.go",
+      "internal/runtime/agent/skill_plant.go"
+    ]
+  },
+  "entry": "direct_artifacts",
+  "artifacts": [
+    {"path": ".claude/skills/synthetic/SKILL.md", "kind": "file", "mode": "0644", "group": "skill:synthetic", "content_ref": "sha256:111111"},
+    {"path": ".claude/skills/synthetic/assets", "kind": "directory", "mode": "0755", "group": "skill:synthetic"},
+    {"path": ".claude/skills/synthetic/assets/tool.sh", "kind": "file", "mode": "0755", "group": "skill:synthetic", "content_ref": "sha256:222222"},
+    {"path": ".claude/skills/revoked/SKILL.md", "kind": "file", "mode": "0644", "group": "skill:revoked", "operation": "owned_remove"}
+  ],
+  "materialization": {
+    "operation": "refresh",
+    "selection": {"groups": ["skill:synthetic", "skill:revoked"]},
+    "remove_owned": true
+  },
+  "runtime_events": [
+    {"kind": "plant.started", "schema": "host_runtime.v1"},
+    {"kind": "plant.completed", "schema": "host_runtime.v1"},
+    {"kind": "sandbox.applied", "schema": "host_runtime.v1", "redact": ["Bearer fixture"]}
+  ]
+}

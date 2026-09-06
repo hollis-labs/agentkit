@@ -75,6 +75,19 @@ var (
 	// non-nil custom Renderer.
 	ErrMissingRenderer = errors.New("agentcontext: nil renderer")
 
+	// ErrMissingCompositionDefinition is returned when an authored
+	// recipe references a required base or part that is not supplied in
+	// ComposeRequest.Definitions.
+	ErrMissingCompositionDefinition = errors.New("agentcontext: missing composition definition")
+
+	// ErrCompositionCycle is returned when recipe base/part references form
+	// a cycle.
+	ErrCompositionCycle = errors.New("agentcontext: composition cycle")
+
+	// ErrCompositionConflict is returned when deterministic merge rules
+	// cannot reconcile duplicate or opaque authored fields.
+	ErrCompositionConflict = errors.New("agentcontext: composition merge conflict")
+
 	// ErrCmdFailed is returned by the cmd resolver when the underlying
 	// shell command exits with a non-zero status. The wrap value
 	// includes the exit code and a captured tail of stderr for

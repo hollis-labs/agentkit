@@ -77,6 +77,11 @@ func (r *providerRuntime) Prepare(ctx context.Context) error {
 }
 
 func (r *providerRuntime) Start(ctx context.Context, opts StartOptions) (Session, error) {
+	var err error
+	opts, err = normalizeProviderStartOptions(opts)
+	if err != nil {
+		return nil, err
+	}
 	system := r.cfg.SystemPrompt
 	if opts.BootPrompt != "" {
 		system = opts.BootPrompt

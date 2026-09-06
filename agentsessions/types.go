@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/hollis-labs/agentkit/agentlaunch"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-sandbox/sandbox"
@@ -165,6 +166,18 @@ type CheckpointHinter interface {
 // the core Session contract.
 type SessionIDer interface {
 	ProviderSessionID() string
+}
+
+// SandboxOutcomeReporter is an optional Session extension implemented by
+// process-backed runtimes that apply a resolved or legacy sandbox at a spawn
+// boundary. The returned outcome is sanitized: it contains policy/backend
+// status and diagnostics, never argv or environment values.
+//
+// Callers type-assert to this interface; it is not part of the core Session
+// contract. A false ok means no sandbox outcome has been observed for the
+// session yet.
+type SandboxOutcomeReporter interface {
+	SandboxOutcome() (SandboxOutcome, bool)
 }
 
 // JsonRpcCaller is the optional interface a Session implements when the
@@ -342,10 +355,37 @@ type StartOptions struct {
 	// runtime (HTTP transport, no subprocess).
 	ExtraFiles []*os.File
 
-	// Profile is the resolved go-sandbox profile. The zero-value
+	// PreparedExecution is the shared go-agent-launch handoff consumed by
+	// session runtimes. When set, Start normalizes Workdir, Env and
+	// ExtraArgs from PreparedExecution.Bindings, disables AutoPlantBootDir
+	// when the prepared value already carries a materialized handle, and
+	// derives SandboxPolicy from PreparedExecution.Access.
+	//
+	// Callers that pass PreparedExecution should not also pass
+	// SandboxPolicy or Profile. Provider-native runtimes do not enforce OS
+	// process policies; required prepared access is rejected there instead
+	// of being silently ignored.
+	PreparedExecution *agentlaunch.PreparedExecution
+
+	// SandboxPolicy is the resolved go-sandbox access policy applied at the
+	// process-spawn boundary. It is preferred over Profile. Passing both is
+	// rejected so callers do not accidentally mix the shared policy model
+	// with the legacy compatibility profile.
+	SandboxPolicy *sandbox.ResolvedAccessPolicy
+
+	// SandboxOutcomeCallback, when set, receives a sanitized outcome each time
+	// a session runtime reaches a spawn boundary and has either launched with,
+	// disabled, or failed sandbox setup for a child. Long-lived runtimes call it
+	// during Start and on supervised restarts; adapter subprocess-per-turn
+	// runtimes call it during SendInput. Callbacks must be cheap and must not
+	// call back into the same Session.
+	SandboxOutcomeCallback func(SandboxOutcome)
+
+	// Profile is the legacy go-sandbox profile. The zero-value
 	// sandbox.Profile (empty ID) disables sandbox wrapping. A non-zero
 	// profile on an unsupported platform is a hard launch failure (per
-	// go-sandbox).
+	// go-sandbox). New callers should prefer PreparedExecution or
+	// SandboxPolicy.
 	Profile sandbox.Profile
 
 	// Fanout receives a tee of session output for the attach broker. Set

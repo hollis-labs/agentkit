@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/hollis-labs/agentkit/artifact"
+	"github.com/hollis-labs/agentkit/materialize"
 )
 
 // S4.3 — Materialization.
@@ -196,42 +199,85 @@ func (m *DefaultMaterializer) reconcile(
 	}
 
 	resolvedInputs := m.resolveInputs(req)
-
+	entries := []artifact.Entry{}
+	pathKind := map[string]string{}
 	result := &MaterializeResult{Runtime: req.Spec.Runtime}
 
-	// Files first, in declaration order, for deterministic output.
+	// Files first, in declaration order, matching the legacy compatibility
+	// contract while handing the actual write/reconcile work to materialize.
 	for i := range req.Spec.Files {
 		f := req.Spec.Files[i]
 		if !scope.wantsFile(f) {
 			continue
 		}
-		rel, written, rendered, werr := m.materializeFile(ctx, bootRoot, req.Spec, f, resolvedInputs, renderer)
-		if werr != nil {
-			return result, werr
+		content, slot, rerr := m.renderObject(ctx, req.Spec, f.Object, resolvedInputs, renderer)
+		if rerr != nil {
+			return result, fmt.Errorf("agentlaunch: materialize file %q: %w", f.ID, rerr)
 		}
-		if written {
-			result.FilesWritten = append(result.FilesWritten, rel)
+		mode := f.Mode
+		if mode == 0 {
+			mode = defaultFileMode
 		}
-		if rendered != "" {
-			result.SlotsRendered = appendUnique(result.SlotsRendered, rendered)
+		entries = append(entries, artifact.Entry{Path: f.RelPath, Kind: artifact.EntryFile, Mode: mode, Bytes: []byte(content), Ownership: artifact.Ownership{EntryID: "bootspec:file:" + f.ID, GroupID: "bootspec:file"}, Provenance: artifact.Provenance{Source: "agentlaunch.BootSpec", SourcePath: f.ID}})
+		pathKind[f.RelPath] = "file"
+		if slot != "" {
+			result.SlotsRendered = appendUnique(result.SlotsRendered, slot)
 		}
 	}
 
-	// Injections next, in declaration order.
+	// Injections next, so a raw injection targeting the same path keeps the
+	// legacy last-writer-wins behavior after artifact normalization.
 	for i := range req.Spec.Injections {
 		inj := req.Spec.Injections[i]
 		if !scope.wantsInjection(inj) {
 			continue
 		}
-		rel, written, rendered, werr := m.materializeInjection(ctx, bootRoot, req.Spec, inj, resolvedInputs, renderer)
-		if werr != nil {
-			return result, werr
+		content, slot, rerr := m.renderObject(ctx, req.Spec, inj.Object, resolvedInputs, renderer)
+		if rerr != nil {
+			return result, fmt.Errorf("agentlaunch: materialize injection %q: %w", inj.ID, rerr)
 		}
-		if written {
-			result.InjectionsWritten = append(result.InjectionsWritten, rel)
+		relPath, perr := injectionRelPath(req.Spec.Runtime, inj)
+		if perr != nil {
+			return result, fmt.Errorf("agentlaunch: materialize injection %q: %w", inj.ID, perr)
 		}
-		if rendered != "" {
-			result.SlotsRendered = appendUnique(result.SlotsRendered, rendered)
+		mode := inj.Mode
+		if mode == 0 {
+			mode = defaultFileMode
+		}
+		entries = upsertBootEntry(entries, artifact.Entry{Path: relPath, Kind: artifact.EntryFile, Mode: mode, Bytes: []byte(content), Ownership: artifact.Ownership{EntryID: "bootspec:injection:" + inj.ID, GroupID: "bootspec:injection"}, Provenance: artifact.Provenance{Source: "agentlaunch.BootSpec", SourcePath: inj.ID}})
+		pathKind[relPath] = "injection"
+		if slot != "" {
+			result.SlotsRendered = appendUnique(result.SlotsRendered, slot)
+		}
+	}
+
+	if len(entries) == 0 {
+		sort.Strings(result.SlotsRendered)
+		return result, nil
+	}
+	normalized, err := artifact.Normalize(entries)
+	if err != nil {
+		return result, err
+	}
+	handle, err := MaterializeArtifacts(ctx, ArtifactMaterializationRequest{
+		TargetRoot: bootRoot,
+		Roots:      ExecutionRoots{BootRoot: bootRoot},
+		Artifacts:  artifact.Tree{Entries: normalized},
+		Operation:  materialize.OperationReconcile,
+		Reconcile:  materialize.ReconcilePolicy{Conflict: materialize.ConflictOverwrite},
+	})
+	if err != nil {
+		return result, err
+	}
+	for _, change := range handle.Report.Changes {
+		if change.Kind == materialize.ChangeUnchanged {
+			continue
+		}
+		switch pathKind[change.Path] {
+		case "file":
+			result.FilesWritten = append(result.FilesWritten, change.Path)
+		case "injection":
+			result.InjectionsWritten = append(result.InjectionsWritten, change.Path)
 		}
 	}
 
@@ -239,6 +285,16 @@ func (m *DefaultMaterializer) reconcile(
 	sort.Strings(result.InjectionsWritten)
 	sort.Strings(result.SlotsRendered)
 	return result, nil
+}
+
+func upsertBootEntry(entries []artifact.Entry, next artifact.Entry) []artifact.Entry {
+	for i := range entries {
+		if entries[i].Path == next.Path {
+			entries[i] = next
+			return entries
+		}
+	}
+	return append(entries, next)
 }
 
 // resolveInputs builds the effective input bag: a value supplied in

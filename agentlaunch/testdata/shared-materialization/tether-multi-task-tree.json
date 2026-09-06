@@ -1,0 +1,39 @@
+{
+  "fixture": "tether-multi-task-tree",
+  "source": {
+    "app": "tether",
+    "checkout": "/Users/chrispian/dev/hollis-labs/apps/tether",
+    "head": "5406114",
+    "dirty": true,
+    "dirty_note": "untracked planning/docs/materialization-planting-review.md present at M01 inspection",
+    "paths": [
+      "cmd/mux/torque_tasks.go",
+      "cmd/mux/torque_tasks_test.go",
+      "internal/app/shared_launch.go",
+      "internal/launch/agentlaunch.go",
+      "internal/launch/resolver.go",
+      "internal/workspace/workroot.go"
+    ]
+  },
+  "entry": "direct_artifacts",
+  "artifacts": [
+    {"path": "tasks/README.md", "kind": "file", "mode": "0644", "group": "tasks"},
+    {"path": "tasks/CW-A/task.md", "kind": "file", "mode": "0644", "group": "tasks"},
+    {"path": "tasks/CW-B/task.md", "kind": "file", "mode": "0644", "group": "tasks"},
+    {"path": "context/copied-tree", "kind": "directory", "mode": "0755", "group": "copied-tree"},
+    {"path": "context/copied-tree/handoff.md", "kind": "file", "mode": "0644", "group": "copied-tree"},
+    {"path": ".mcp.json", "kind": "file", "mode": "0600", "group": "provider-overlay"}
+  ],
+  "checks": [
+    "two synthetic tasks produce README plus per-task task.json/task.md/process.md files",
+    "duplicate task ids and safe-directory collisions fail",
+    "copied worktree/context trees preserve tree shape and injection conversion preserves overlay values"
+  ],
+  "collision_policy": "detect_duplicates_and_prefix_collisions",
+  "access": {
+    "mode": "required",
+    "project_root": "/synthetic/tether/worktree",
+    "boot_root": "/synthetic/tether/boot",
+    "cwd": "/synthetic/tether/worktree"
+  }
+}

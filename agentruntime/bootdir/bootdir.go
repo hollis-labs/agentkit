@@ -2,6 +2,7 @@
 package bootdir
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,8 @@ import (
 	"strings"
 
 	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/agentkit/artifact"
+	"github.com/hollis-labs/agentkit/materialize"
 )
 
 var (
@@ -161,26 +164,57 @@ func (w Writer) WriteFiles(bootDir string, files []File) (WriteResult, error) {
 }
 
 func (w Writer) writePlannedFiles(bootDir string, files []plannedFile) (WriteResult, error) {
+	entries := make([]artifact.Entry, 0, len(files))
 	result := WriteResult{Files: make([]WrittenFile, 0, len(files))}
-	write := w.AtomicWrite
-	if write == nil {
-		write = defaultAtomicWrite
-	}
 	for _, planned := range files {
-		path := filepath.Join(bootDir, filepath.FromSlash(planned.file.RelPath))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return WriteResult{}, fmt.Errorf("bootdir: plant %q: mkdir: %w", planned.file.RelPath, err)
-		}
-		if err := write(path, []byte(planned.file.Content), planned.file.Mode); err != nil {
-			return WriteResult{}, fmt.Errorf("bootdir: plant %q: %w", planned.file.RelPath, err)
-		}
-		result.Files = append(result.Files, WrittenFile{
-			RelPath: planned.file.RelPath,
-			Mode:    planned.file.Mode,
-			Source:  planned.source,
+		entries = upsertBootdirEntry(entries, artifact.Entry{
+			Path:  planned.file.RelPath,
+			Kind:  artifact.EntryFile,
+			Mode:  planned.file.Mode,
+			Bytes: []byte(planned.file.Content),
+			Ownership: artifact.Ownership{
+				EntryID: "agentruntime.bootdir:" + planned.file.RelPath,
+				GroupID: "agentruntime.bootdir:" + planned.source,
+			},
+			Provenance: artifact.Provenance{Source: "agentruntime/bootdir", Note: planned.source},
 		})
+		result.Files = append(result.Files, WrittenFile{RelPath: planned.file.RelPath, Mode: planned.file.Mode, Source: planned.source})
+	}
+	if w.AtomicWrite != nil {
+		for _, planned := range files {
+			target := filepath.Join(bootDir, filepath.FromSlash(planned.file.RelPath))
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return WriteResult{}, fmt.Errorf("bootdir: plant %q: mkdir: %w", planned.file.RelPath, err)
+			}
+			if err := w.AtomicWrite(target, []byte(planned.file.Content), planned.file.Mode); err != nil {
+				return WriteResult{}, fmt.Errorf("bootdir: plant %q: %w", planned.file.RelPath, err)
+			}
+		}
+	}
+	normalized, err := artifact.Normalize(entries)
+	if err != nil {
+		return WriteResult{}, err
+	}
+	if _, err := agentlaunch.MaterializeArtifacts(context.Background(), agentlaunch.ArtifactMaterializationRequest{
+		TargetRoot: bootDir,
+		Roots:      agentlaunch.ExecutionRoots{BootRoot: bootDir},
+		Artifacts:  artifact.Tree{Entries: normalized},
+		Operation:  materialize.OperationReconcile,
+		Reconcile:  materialize.ReconcilePolicy{Conflict: materialize.ConflictOverwrite},
+	}); err != nil {
+		return WriteResult{}, fmt.Errorf("bootdir: materialize: %w", err)
 	}
 	return result, nil
+}
+
+func upsertBootdirEntry(entries []artifact.Entry, next artifact.Entry) []artifact.Entry {
+	for i := range entries {
+		if entries[i].Path == next.Path {
+			entries[i] = next
+			return entries
+		}
+	}
+	return append(entries, next)
 }
 
 type plannedFile struct {

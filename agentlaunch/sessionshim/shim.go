@@ -35,8 +35,8 @@ import (
 	"github.com/hollis-labs/agentkit/agentlaunch/providerplant"
 )
 
-// ErrNilPrepared is returned by ToSessionLaunch when the *PreparedLaunch
-// argument is nil.
+// ErrNilPrepared is returned by ToSessionLaunch when the prepared argument is
+// nil.
 var ErrNilPrepared = errors.New("agentlaunch/sessionshim: nil prepared launch")
 
 // SessionLaunch is the runtime-ready result of converting a
@@ -102,6 +102,32 @@ func ToSessionLaunch(prepared *agentlaunch.PreparedLaunch) (SessionLaunch, error
 	}, nil
 }
 
+// ToSessionLaunchFromPreparedExecution converts the shared M12
+// PreparedExecution handoff into a session launch. The PreparedExecution is
+// passed through StartOptions so agentsessions can apply exact bindings,
+// resolved access policy and materialization ownership at Start.
+func ToSessionLaunchFromPreparedExecution(prepared *agentlaunch.PreparedExecution) (SessionLaunch, error) {
+	if prepared == nil {
+		return SessionLaunch{}, ErrNilPrepared
+	}
+	if err := prepared.Validate(); err != nil {
+		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
+	}
+	return SessionLaunch{
+		Binary: prepared.Bindings.Argv[0],
+		Options: agentsessions.StartOptions{
+			Workdir:           prepared.Bindings.CWD,
+			WorkspaceDir:      prepared.Roots.StateRoot,
+			Env:               preparedEnvKV(prepared.Bindings.Env),
+			ExtraArgs:         append([]string(nil), prepared.Bindings.Argv[1:]...),
+			PreparedExecution: prepared,
+			// AutoPlantBootDir intentionally false — PreparedExecution
+			// already carries materialization ownership when files have
+			// been planted.
+		},
+	}, nil
+}
+
 // envKV flattens a map into the sorted "KEY=VALUE" slice form
 // StartOptions.Env expects. Nil/empty in → nil out.
 func envKV(env map[string]string) []string {
@@ -116,6 +142,22 @@ func envKV(env map[string]string) []string {
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, k+"="+env[k])
+	}
+	return out
+}
+
+func preparedEnvKV(env map[string]agentlaunch.EnvVar) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+env[k].Value)
 	}
 	return out
 }

@@ -92,3 +92,52 @@ func TestToSessionLaunch_Invalid(t *testing.T) {
 		t.Fatal("expected validation error for incomplete PreparedLaunch")
 	}
 }
+
+func TestToSessionLaunchFromPreparedExecution(t *testing.T) {
+	prepared := &agentlaunch.PreparedExecution{
+		InputKind: agentlaunch.PrepareInputArtifacts,
+		Bindings: agentlaunch.ExecutionBindings{
+			Argv: []string{"codex", "exec", "--json"},
+			Env: map[string]agentlaunch.EnvVar{
+				"BETA":  {Value: "2"},
+				"ALPHA": {Value: "1"},
+			},
+			CWD: "/proj",
+		},
+		Roots: agentlaunch.ExecutionRoots{ProjectRoot: "/proj", StateRoot: "/state", CWD: "/proj"},
+		Access: agentlaunch.AccessRequirements{
+			Mode: agentlaunch.AccessRequired,
+			Host: agentlaunch.ExecutionHostLocal,
+		},
+	}
+
+	sl, err := ToSessionLaunchFromPreparedExecution(prepared)
+	if err != nil {
+		t.Fatalf("ToSessionLaunchFromPreparedExecution: %v", err)
+	}
+	if sl.Binary != "codex" {
+		t.Fatalf("Binary = %q, want codex", sl.Binary)
+	}
+	if want := []string{"exec", "--json"}; !slices.Equal(sl.Options.ExtraArgs, want) {
+		t.Fatalf("ExtraArgs = %v, want %v", sl.Options.ExtraArgs, want)
+	}
+	if want := []string{"ALPHA=1", "BETA=2"}; !slices.Equal(sl.Options.Env, want) {
+		t.Fatalf("Env = %v, want %v", sl.Options.Env, want)
+	}
+	if sl.Options.Workdir != "/proj" || sl.Options.WorkspaceDir != "/state" {
+		t.Fatalf("Options dirs = %q/%q, want /proj//state", sl.Options.Workdir, sl.Options.WorkspaceDir)
+	}
+	if sl.Options.PreparedExecution != prepared {
+		t.Fatalf("PreparedExecution was not carried through")
+	}
+	if sl.Options.AutoPlantBootDir {
+		t.Fatal("AutoPlantBootDir = true, want false for prepared execution handoff")
+	}
+}
+
+func TestToSessionLaunchFromPreparedExecution_Invalid(t *testing.T) {
+	_, err := ToSessionLaunchFromPreparedExecution(&agentlaunch.PreparedExecution{})
+	if err == nil {
+		t.Fatal("expected validation error for invalid PreparedExecution")
+	}
+}
