@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/agentkit/artifact"
-	"github.com/hollis-labs/agentkit/materialize"
+	"github.com/hollis-labs/go-materialize/artifact"
+	"github.com/hollis-labs/go-materialize/materialize"
 )
 
 // S4.3 — Materialization.

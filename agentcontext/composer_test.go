@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hollis-labs/agentkit/artifact"
+	"github.com/hollis-labs/go-materialize/artifact"
 )
 
 type composeStubProvider struct{}

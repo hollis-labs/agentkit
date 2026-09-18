@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/hollis-labs/agentkit/agentcontext"
-	"github.com/hollis-labs/agentkit/artifact"
+	"github.com/hollis-labs/go-materialize/artifact"
 )
 
 func TestResolvePreparation_ResolvedCompositionInstallsDocumentsAndArtifacts(t *testing.T) {

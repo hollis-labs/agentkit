@@ -3,7 +3,7 @@ package agentlaunch
 import (
 	"github.com/hollis-labs/go-providers/provider"
 
-	"github.com/hollis-labs/agentkit/artifact"
+	"github.com/hollis-labs/go-materialize/artifact"
 )
 
 // ProviderProjectionFromProvider translates go-providers' provider-owned pure

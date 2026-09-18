@@ -4,8 +4,8 @@ import (
 	"errors"
 
 	"github.com/hollis-labs/agentkit/agentcontext"
-	"github.com/hollis-labs/agentkit/artifact"
-	"github.com/hollis-labs/agentkit/materialize"
+	"github.com/hollis-labs/go-materialize/artifact"
+	"github.com/hollis-labs/go-materialize/materialize"
 )
 
 var (

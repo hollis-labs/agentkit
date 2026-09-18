@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed
+
+- `artifact` and `materialize` moved out to their own module,
+  [`go-materialize`](https://github.com/hollis-labs/go-materialize)
+  (CW-20260918-0036): both packages had no dependency beyond stdlib on
+  each other, so folio's scaffolding writer can now depend on the same
+  write engine agentkit uses instead of hand-rolling its own. All former
+  `agentkit/artifact` and `agentkit/materialize` imports now resolve to
+  `go-materialize/artifact` and `go-materialize/materialize` — hard
+  cutover, no compatibility aliases were kept.
+- The persisted manifest path changed from the agentkit-branded
+  `.agentkit/materialize-manifest.json` to `.materialize/manifest.json`
+  as part of that move (breaking: a manifest written by a pre-cutover
+  agentkit is not found by `Reconcile`/`Refresh` after upgrading; the
+  next `Create` rewrites it at the new path).
+
 ## v0.6.1 — 2026-09-06
 
 - Preserve buffered streaming-stdio events when a child exits before its

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hollis-labs/agentkit/artifact"
+	"github.com/hollis-labs/go-materialize/artifact"
 )
 
 type ComposerOptions struct {

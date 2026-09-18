@@ -19,8 +19,12 @@ logic, ships no persistence, and never imports Tether, Torque or Nanite.
 - `agentsessions/` runs one agent process. `types.go` defines the Capabilities
   flags that select the lifecycle shape; `manager.go` owns registration,
   supervision and attach fan-out.
-- `artifact/` models authorized materialization inputs; `materialize/engine.go`
-  stages and publishes a tree, and `materialize/reconcile.go` owns the manifest.
+- Materialization inputs (`Entry`/`Tree`) and the write engine (staged create,
+  `Reconcile`/`Refresh`) live in
+  [`go-materialize`](https://github.com/hollis-labs/go-materialize)
+  (`artifact`/`materialize` packages), not in this repo — agentkit depends on
+  it like any other consumer. See that module's own `doc.go` files for the
+  contract.
 - `agentruntime/` is a deliberately thin facade; its surface is in subpackages.
 - `broker/` routes one turn to an agent profile.
 
@@ -37,7 +41,7 @@ govulncheck ./...
 
 `.github/workflows/check.yml` runs those five checks on push and on pull request
 to `main`, and is the landing gate. Use `-race` before landing anything in
-`agentsessions` or `materialize`; both are concurrent by design.
+`agentsessions`; it's concurrent by design.
 
 ## Boundaries
 
@@ -52,13 +56,6 @@ ContextRequests must render byte-identically, which is why slots are walked in
 slice order and the request is canonicalized with sorted keys before hashing.
 Resolver-side non-determinism is the caller's problem and does not license
 reordering here.
-
-`materialize` writes through an `os.Root` opened on the target parent, stages
-under a private directory, and publishes with `Root.Rename`. Symlinks anywhere
-in the destination parent chain are rejected before that root is opened. A mode
-that cannot uphold those guarantees returns an unsupported or unsafe-target
-error instead of weakening the boundary. Reconcile deliberately does not claim
-whole-directory transaction semantics over a mixed-ownership home.
 
 `agentlaunch/parity` reads the live `~/.tether/catalog/` on this machine, and
 must only ever read it. `TestParity_ReadOnlyContract` guards that the in-memory
