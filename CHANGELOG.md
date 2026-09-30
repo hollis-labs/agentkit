@@ -4,6 +4,27 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `StartOptions.DenyGUILaunch`: the child cannot launch GUI applications (for
+  example an agent CLI whose sign-in fallback opens a browser and waits). It is
+  folded into the one sandbox that wraps the child instead of stacking a second
+  one (nested seatbelt profiles fail): onto `SandboxPolicy` or `Profile` when
+  set, and otherwise as a minimal default-allow `Profile` carrying only the
+  knob. It needs go-sandbox v0.4.0 and is enforced on macOS; where the
+  platform cannot enforce it, and for provider-native runtimes, Start fails
+  with the new `ErrGUILaunchDenyUnsupported` rather than run unconfined.
+- `StartOptions.EndTurnOnAuthFailure` (opt-in): a subprocess-per-turn turn ends
+  as soon as the adapter's `AuthFailureClassifier` matches stderr, instead of
+  waiting out the CLI (agy waits 60s for a browser sign-in). The turn fails
+  with an error wrapping `provider.ErrProviderNotAuthenticated`.
+
+### Changed
+
+- Requires go-sandbox v0.4.0 (was v0.3.0).
+
 ## v0.9.0 — 2026-09-30
 
 Minor. One behavior change (the Claude skill path) and one additive type.

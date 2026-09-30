@@ -13,6 +13,8 @@ github.com/hollis-labs/go-runner v0.7.0 h1:nJIDnZHBVn1Ii8hITTxLsGMVaEI9AWipar85q
 github.com/hollis-labs/go-runner v0.7.0/go.mod h1:+PgCa0CxAImd63sZgLb8Zw0uasyDWyHRdcE2sH8Zc7Q=
 github.com/hollis-labs/go-sandbox v0.3.0 h1:17vfC0Oikr05Rl4t9uxtko68dszbkLFspAdXJagfMPg=
 github.com/hollis-labs/go-sandbox v0.3.0/go.mod h1:SY3Io7cTHnMahfN1zkQzHvVkcevXzus8mo9ZmtaaHPg=
+github.com/hollis-labs/go-sandbox v0.4.0 h1:1Dv++5ApL09CiDVVD8ny9W6fUeHt9GIotn0LOp8lxd0=
+github.com/hollis-labs/go-sandbox v0.4.0/go.mod h1:MzF8Y0T3TmCHALvHi6vTkIZimc+rlWfu7OQUksYx6R8=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=

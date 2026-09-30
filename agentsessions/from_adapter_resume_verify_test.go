@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
@@ -84,6 +86,16 @@ func writeAgyLikeScript(t *testing.T, dir string) string {
 	}
 	path := filepath.Join(dir, "fake-agy.sh")
 	body := `#!/bin/sh
+if [ -f "` + filepath.Join(dir, "guiprobe") + `" ]; then
+  out=$(/usr/bin/open -h 2>&1)
+  printf '%s' "$out" > "` + filepath.Join(dir, "probe.out") + `"
+  printf 'done\n'; exit 0
+fi
+if [ -f "` + filepath.Join(dir, "hangauth") + `" ]; then
+  printf 'error: authentication failed or timed out\n' 1>&2
+  sleep 30
+  exit 0
+fi
 if [ -f "` + filepath.Join(dir, "auth") + `" ]; then
   printf 'error: authentication failed or timed out\n' 1>&2
   exit 1
@@ -256,5 +268,77 @@ func TestAdapterRuntime_ResumeLostByStderrOnly(t *testing.T) {
 	}
 	if got := sess.(SessionIDer).ProviderSessionID(); got != "" {
 		t.Errorf("stored id = %q; want it cleared", got)
+	}
+}
+
+func TestAdapterRuntime_EndTurnOnAuthFailureDoesNotWaitOutTheCLI(t *testing.T) {
+	a := &agyLikeAdapter{keepsID: true}
+	dir := t.TempDir()
+	a.script = writeAgyLikeScript(t, dir)
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{ID: "agy-like", Kind: "cli", Adapter: a, Caps: Capabilities{ProviderSessionID: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := rt.Start(context.Background(), StartOptions{Workdir: dir, EndTurnOnAuthFailure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+	if err := os.WriteFile(filepath.Join(dir, "hangauth"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err = sess.SendInput(context.Background(), []byte("x"))
+	if !errors.Is(err, provider.ErrProviderNotAuthenticated) {
+		t.Fatalf("err = %v; want ErrProviderNotAuthenticated", err)
+	}
+	// The fake CLI sleeps 30s after printing the marker; ending early must not
+	// wait that out.
+	if d := time.Since(start); d > 15*time.Second {
+		t.Fatalf("turn took %v; the marker should have ended it immediately", d)
+	}
+}
+
+// Through the real adapter runtime (go-runner spawns the child), DenyGUILaunch
+// must make open(1) unexecutable inside the launched process.
+func TestAdapterRuntime_DenyGUILaunchReachesTheChild(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS sandbox-exec only")
+	}
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not found")
+	}
+	for _, tc := range []struct {
+		name string
+		deny bool
+	}{{"denied", true}, {"control", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &agyLikeAdapter{keepsID: true}
+			dir := t.TempDir()
+			a.script = writeAgyLikeScript(t, dir)
+			rt, err := NewFromAdapter(AdapterRuntimeConfig{ID: "agy-like", Kind: "cli", Adapter: a, Caps: Capabilities{ProviderSessionID: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sess, err := rt.Start(context.Background(), StartOptions{Workdir: dir, DenyGUILaunch: tc.deny})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+			if err := os.WriteFile(filepath.Join(dir, "guiprobe"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := sess.SendInput(context.Background(), []byte("x")); err != nil {
+				t.Fatal(err)
+			}
+			probe, err := os.ReadFile(filepath.Join(dir, "probe.out"))
+			if err != nil {
+				t.Fatalf("the child did not run the probe: %v", err)
+			}
+			denied := strings.Contains(string(probe), "Operation not permitted")
+			if denied != tc.deny {
+				t.Fatalf("open denied = %v, want %v; probe output: %q", denied, tc.deny, probe)
+			}
+		})
 	}
 }
