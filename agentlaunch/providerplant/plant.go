@@ -393,6 +393,10 @@ func skillRelPath(providerID, name string) string {
 		// a bootdir .opencode/skills tree is never read (opencode 1.18.30,
 		// go-providers layout probe O2).
 		return "skills/" + name + "/SKILL.md"
+	case "antigravity":
+		// agy has no config-dir variable, so skills go to the workspace
+		// customization root it discovers from cwd (the bootdir).
+		return ".agents/skills/" + name + "/SKILL.md"
 	default:
 		return "skills/" + name + ".md"
 	}

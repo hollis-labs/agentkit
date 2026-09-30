@@ -26,6 +26,7 @@ type AdapterResolver func(*agentlaunch.CompiledLaunch) (provider.BootDirProvider
 //     for the jsonrpc-stdio runtime (the app-server daemon rejects the
 //     --cd flag, so its BootDirSpec suppresses ProjectDirArg)
 //   - opencode → &provider.OpencodeAdapter{Agent: <agent name>}
+//   - antigravity → provider.NewAntigravityAdapter()
 //
 // The agent name fed to the opencode adapter is AgentSpec.Name, falling
 // back to AgentSpec.ID — the same precedence Prepare uses for
@@ -85,6 +86,10 @@ func DefaultResolver(compiled *agentlaunch.CompiledLaunch) (provider.BootDirProv
 		}
 		a.Agent = agentName(plan)
 		return a, nil
+	case matrix.BootDirRendererAntigravity:
+		// The planted spec does not depend on model or permission; those
+		// are per-turn argv owned by the consumer's runtime adapter.
+		return provider.NewAntigravityAdapter(), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownRenderer, desc.BootDirRenderer)
 	}

@@ -42,3 +42,19 @@ func TestResolveRejectsUnknownProviderUnlessGenericSubprocessOptIn(t *testing.T)
 		t.Fatalf("runtime = %q, want subprocess", b.Runtime)
 	}
 }
+
+func TestResolveAntigravity(t *testing.T) {
+	for _, name := range []string{"antigravity", "agy", "Antigravity-CLI"} {
+		b, err := Resolve(Request{Provider: name})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if b.Provider != "antigravity" || b.Runtime != runtimekind.Subprocess {
+			t.Fatalf("%s: binding = %+v", name, b)
+		}
+	}
+	// stream-json stdin does not report turn ends reliably in agy 1.2.7.
+	if _, err := Resolve(Request{Provider: "agy", RequestedRuntime: runtimekind.StreamingStdio}); !errors.Is(err, ErrUnsupportedBinding) {
+		t.Fatalf("agy streaming-stdio = %v, want ErrUnsupportedBinding", err)
+	}
+}

@@ -87,6 +87,8 @@ func normalizeProvider(s string) string {
 		return "codex"
 	case strings.HasPrefix(s, "opencode"):
 		return "opencode"
+	case strings.HasPrefix(s, "antigravity"), s == "agy":
+		return "antigravity"
 	case strings.Contains(s, "anthropic"), strings.Contains(s, "openai"):
 		return "api"
 	default:
@@ -108,6 +110,8 @@ func defaultRuntime(provider string, posture Posture) agentlaunch.RuntimeKind {
 		return runtimekind.Subprocess
 	case "opencode":
 		return runtimekind.Subprocess
+	case "antigravity":
+		return runtimekind.Subprocess
 	default:
 		return runtimekind.Subprocess
 	}
@@ -115,7 +119,7 @@ func defaultRuntime(provider string, posture Posture) agentlaunch.RuntimeKind {
 
 func knownProvider(provider string) bool {
 	switch provider {
-	case "api", "claude", "codex", "opencode":
+	case "api", "claude", "codex", "opencode", "antigravity":
 		return true
 	default:
 		return false
@@ -133,6 +137,11 @@ func supported(provider string, runtime agentlaunch.RuntimeKind) bool {
 		return runtime == runtimekind.Subprocess || runtime == runtimekind.JSONRPCStdio
 	case "opencode":
 		return runtime == runtimekind.Subprocess || runtime == runtimekind.ServeHTTP
+	case "antigravity":
+		// agy runs one subprocess per turn; its stream-json stdin mode
+		// does not report turn ends reliably (go-providers
+		// AntigravityAdapter doc).
+		return runtime == runtimekind.Subprocess
 	default:
 		return false
 	}
