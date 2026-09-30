@@ -30,8 +30,9 @@ import (
 
 // deltaOnlyAdapter is a provider.CLIAdapter whose ParseLine never emits a
 // terminal llmtypes.StreamEvent (EventDone / EventError / EventUsage),
-// mirroring go-providers' provider.OpencodeAdapter (pty_opencode.go,
-// Mode == "", the only Mode Nanite's composition root wires up).
+// mirroring go-providers' provider.OpencodeAdapter as it was before run
+// mode moved to structured --format json output (it now emits its own
+// EventDone at the end of a turn).
 type deltaOnlyAdapter struct {
 	script string
 }
@@ -60,9 +61,8 @@ func (a *deltaOnlyAdapter) Detect() (string, bool) {
 
 // echoUsageAdapter is a provider.CLIAdapter whose ParseLine maps a "usage"
 // line to llmtypes.EventUsage and nothing else to EventDone/EventError —
-// used to confirm EventUsage alone (not just EventDone/EventError) counts
-// as "the adapter already produced its own terminal signal" and suppresses
-// synthesis, per this task's own scope (EventDone/EventError/EventUsage).
+// used to confirm EventUsage alone is not a terminal signal and does not
+// suppress synthesis.
 type echoUsageAdapter struct {
 	script string
 }
@@ -253,11 +253,11 @@ func TestAdapterRuntime_DoesNotDoubleFireTerminalEvent_WhenAdapterEmitsItsOwn(t 
 	}
 }
 
-// TestAdapterRuntime_DoesNotDoubleFireTerminalEvent_WhenAdapterEmitsUsageOnly
-// confirms EventUsage alone (no EventDone from the adapter) also counts as
-// "already saw a terminal signal" and suppresses synthesis — this task's
-// own scope explicitly includes EventUsage alongside EventDone/EventError.
-func TestAdapterRuntime_DoesNotDoubleFireTerminalEvent_WhenAdapterEmitsUsageOnly(t *testing.T) {
+// TestAdapterRuntime_UsageIsNotTerminal_CleanExit: EventUsage alone is not
+// a terminal event. OpenCode's structured run mode reports usage once per
+// step, several per turn, so a clean exit after usage but no EventDone still
+// gets exactly one synthesized EventDone.
+func TestAdapterRuntime_UsageIsNotTerminal_CleanExit(t *testing.T) {
 	dir := t.TempDir()
 	script := writeTestScript(t, dir, []string{
 		"delta:hello",
@@ -297,10 +297,63 @@ func TestAdapterRuntime_DoesNotDoubleFireTerminalEvent_WhenAdapterEmitsUsageOnly
 			doneCount++
 		}
 	}
-	if usageCount != 1 {
-		t.Fatalf("EventFanout carried %d EventUsage events, want exactly 1: %#v", usageCount, got)
+	if usageCount != 1 || doneCount != 1 {
+		t.Fatalf("EventFanout carried %d usage / %d done events, want 1 / 1 (usage is not terminal, done is synthesized): %#v", usageCount, doneCount, got)
 	}
-	if doneCount != 0 {
-		t.Fatalf("EventFanout carried %d synthesized EventDone events after an EventUsage terminal signal, want 0 (no double-fire): %#v", doneCount, got)
+	if got[len(got)-1].Type != llmtypes.EventDone {
+		t.Fatalf("last event = %+v, want the synthesized EventDone", got[len(got)-1])
+	}
+}
+
+// TestAdapterRuntime_UsageThenCrash_SynthesizesEventError: a turn that
+// reports usage for a finished step and then dies must still surface an
+// EventError. Before usage stopped counting as terminal, the usage line
+// suppressed synthesis and the crash was silent.
+func TestAdapterRuntime_UsageThenCrash_SynthesizesEventError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test script needs sh; not running on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "usage-crash.sh")
+	body := "#!/bin/sh\nprintf 'delta:step one\\n'\nprintf 'usage\\n'\nexit 3\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{
+		ID:      "usage-then-crash",
+		Kind:    "cli",
+		Adapter: &echoUsageAdapter{script: path},
+	})
+	if err != nil {
+		t.Fatalf("NewFromAdapter: %v", err)
+	}
+
+	eventCh := make(chan llmtypes.StreamEvent, 8)
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir:     dir,
+		EventFanout: eventCh,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sess.Stop(context.Background()) }()
+
+	if err := sess.SendInput(context.Background(), []byte("ignored")); err == nil {
+		t.Fatal("SendInput = nil, want the non-zero exit")
+	}
+
+	got := drainEvents(eventCh)
+	if len(got) == 0 {
+		t.Fatal("EventFanout received no events at all")
+	}
+	last := got[len(got)-1]
+	if last.Type != llmtypes.EventError || last.Error == "" {
+		t.Fatalf("last event = %+v, want a synthesized EventError after usage: %#v", last, got)
+	}
+	for _, ev := range got {
+		if ev.Type == llmtypes.EventDone {
+			t.Fatalf("crashed turn carried an EventDone: %#v", got)
+		}
 	}
 }

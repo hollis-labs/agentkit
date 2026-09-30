@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -203,8 +204,10 @@ type adapterSession struct {
 	turnID  atomic.Value // string
 
 	// turnSawTerminal tracks whether the adapter's own ParseLine emitted a
-	// terminal llmtypes.StreamEvent (EventDone / EventError / EventUsage)
-	// during the in-flight turn. Reset at the top of each SendInput;
+	// terminal llmtypes.StreamEvent (EventDone / EventError) during the
+	// in-flight turn. EventUsage is not terminal: OpenCode reports usage
+	// once per step and a turn can have several, so usage alone must not
+	// suppress the EventError a later crash would synthesize. Reset at the top of each SendInput;
 	// consulted after runner.Run returns to decide whether SendInput must
 	// synthesize a terminal event on the adapter's behalf (see
 	// synthesizeTerminalEvent). Some adapters — OpenCode's `opencode
@@ -284,6 +287,17 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	sessionID, _ := s.sessionID.Load().(string)
 	args := s.buildArgs(prompt, sessionID)
 
+	// A resume turn against an adapter that can recognize a dead resume id
+	// keeps a bounded copy of the turn's stderr for it to inspect; stderr
+	// still reaches StartOptions.Stderr unchanged.
+	stderr := s.opts.Stderr
+	classifier, canClassify := s.adapter.(provider.SessionLostClassifier)
+	var stderrTail *tailWriter
+	if canClassify && sessionID != "" {
+		stderrTail = &tailWriter{w: stderr, max: sessionLostTailBytes}
+		stderr = stderrTail
+	}
+
 	turnID := defaultIDFn()
 	s.turnID.Store(turnID)
 	s.turnSawTerminal.Store(false)
@@ -308,7 +322,7 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 		Workspace:     s.opts.Workdir,
 		Args:          args,
 		Env:           s.opts.Env,
-		Stderr:        s.opts.Stderr,
+		Stderr:        stderr,
 		ExtraFiles:    s.opts.ExtraFiles,
 		WaitDelay:     s.runtime.cfg.WaitDelay,
 		OnEvent:       s.handleRunnerEvent,
@@ -329,16 +343,26 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 		}
 	}
 
+	// A dead resume id fails every turn that passes it, so drop it: the
+	// next SendInput starts a fresh provider session. Whether to resend
+	// this prompt without the lost history is the caller's decision, so
+	// the error says what happened instead of retrying here.
+	if err != nil && stderrTail != nil && classifier.IsSessionLost(stderrTail.Bytes()) {
+		s.sessionID.CompareAndSwap(sessionID, "")
+		err = fmt.Errorf("agentsessions: provider session %q: %w: %w", sessionID, provider.ErrProviderSessionLost, err)
+	}
+
 	// runner.Run has fully returned — cfg.OnEvent (handleRunnerEvent) has
 	// already observed every EventProviderEvent the adapter emitted for
 	// this turn, synchronously, on this same goroutine (go-runner's
 	// runOnce calls OnEvent directly from streamProviderEvents/its own
 	// terminal switch, never from a separate goroutine). If the adapter
 	// never produced its own terminal llmtypes.StreamEvent
-	// (EventDone/EventError/EventUsage) — true today for OpenCode's
-	// `opencode run`, whose ParseLine only ever emits EventDelta by
-	// design — synthesize one here so a real subprocess exit always
-	// surfaces a terminal event to EventFanout/Fanout. Adapters that
+	// (EventDone/EventError) — true for adapters whose ParseLine never
+	// emits one, such as the ACP pass-throughs, and for any turn whose
+	// process dies before its terminal line — synthesize one here so a
+	// real subprocess exit always surfaces a terminal event to
+	// EventFanout/Fanout. Adapters that
 	// already emit their own (Codex's "turn.completed" line, for example)
 	// are unaffected: turnSawTerminal short-circuits this before it fires.
 	if !s.turnSawTerminal.Load() {
@@ -397,7 +421,7 @@ func (s *adapterSession) handleRunnerEvent(ev runner.Event) {
 					s.opts.OnSessionID(pe.SessionID)
 				}
 			}
-			if pe.Type == llmtypes.EventDone || pe.Type == llmtypes.EventError || pe.Type == llmtypes.EventUsage {
+			if pe.Type == llmtypes.EventDone || pe.Type == llmtypes.EventError {
 				// The adapter emitted its own terminal event this turn
 				// (e.g. Codex's "turn.completed") — SendInput's post-Run
 				// synthesis must not double-fire once runner.Run returns.
@@ -449,6 +473,42 @@ func (s *adapterSession) CheckpointHints() (CheckpointHint, bool) {
 func (s *adapterSession) ProviderSessionID() string {
 	id, _ := s.sessionID.Load().(string)
 	return id
+}
+
+// sessionLostTailBytes bounds the stderr kept per resume turn for a
+// SessionLostClassifier. The message it looks for is the last thing the
+// CLI writes before exiting.
+const sessionLostTailBytes = 4096
+
+// tailWriter forwards every write to w (when non-nil) and keeps only the
+// last max bytes written. go-runner writes a process's stderr from one
+// goroutine, but Bytes is read after runner.Run returns, so the buffer is
+// still guarded.
+type tailWriter struct {
+	w   io.Writer
+	max int
+
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (t *tailWriter) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = append(t.buf[:0], t.buf[over:]...)
+	}
+	t.mu.Unlock()
+	if t.w == nil {
+		return len(p), nil
+	}
+	return t.w.Write(p)
+}
+
+func (t *tailWriter) Bytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.buf...)
 }
 
 // LivePID — PIDReporter. Subprocess-per-turn semantics: 0 between turns,
