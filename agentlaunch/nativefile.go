@@ -16,6 +16,8 @@ const (
 	//   - opencode → skills/<ID>/SKILL.md (under OPENCODE_CONFIG_DIR;
 	//     opencode keys the skill on a frontmatter `name` and drops a
 	//     SKILL.md without one, so Content should carry it)
+	//   - antigravity → .agents/skills/<ID>/SKILL.md (workspace root, cwd =
+	//     bootdir)
 	//   - codex / others → skills/<ID>.md (no native skill dir; planted
 	//     under a neutral skills/ directory for inspection parity)
 	//

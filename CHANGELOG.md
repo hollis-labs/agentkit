@@ -4,6 +4,39 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.8.0 — 2026-09-30
+
+Minor: additive. No existing API is removed. Behavior changes only for
+callers that set `TypedEventCallback` on a subprocess-per-turn runtime
+(typed events now arrive) and for adapters that implement the new optional
+go-providers extensions.
+
+### Added
+
+- Antigravity (`agy`) as a known provider: runtimebind (`antigravity`/`agy`,
+  subprocess only), matrix pair antigravity × subprocess
+  (`BootDirRendererAntigravity`, binary `agy`), providerplant
+  `DefaultResolver`, and the `NativeFileSkill` path
+  `.agents/skills/<id>/SKILL.md` (workspace root, cwd = bootdir).
+- agentsessions, for go-providers' new optional adapter extensions:
+  - `Prepare` runs `provider.Preflighter` after `Detect`.
+  - A failed turn the adapter recognizes as a login failure
+    (`provider.AuthFailureClassifier`) returns an error wrapping
+    `provider.ErrProviderNotAuthenticated`.
+  - `StartOptions.OnProviderSessionLost(requested, actual, reason)` fires
+    when a resume turn on a `provider.SessionResumeVerifier` adapter ran in
+    a new provider session. The same notice goes out as `events.SessionLost`
+    on `TypedEventCallback` and as a `[session_lost] requested=… actual=…`
+    marker on the byte Fanout. The turn is not failed.
+- `TypedEventCallback` is honoured on the subprocess-per-turn path for
+  adapters that implement `provider.EventParser`: the turn's adapter is
+  tapped, so typed events arrive in line order. `events.PermissionDenied` is
+  also marked on the byte Fanout as `[permission_denied:<action>] <name>`.
+
+### Dependencies
+
+- go-providers v0.29.0 (AntigravityAdapter and the optional extensions).
+
 ## v0.7.0 — 2026-09-30
 
 Breaking in two places: the `artifact` / `materialize` packages leave

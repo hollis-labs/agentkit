@@ -117,6 +117,44 @@ func TestPlant_Opencode(t *testing.T) {
 	}
 }
 
+// TestPlant_Antigravity: agy projects into the workspace root it discovers
+// from cwd (the bootdir), never into ~/.gemini, and attaches the project
+// with --add-dir.
+func TestPlant_Antigravity(t *testing.T) {
+	isolateHome(t)
+	body := "---\nname: code-review\ndescription: Review code\n---\nSKILL BODY\n"
+	inj := agentlaunch.InjectionSpec{NativeFiles: []agentlaunch.NativeFile{
+		{Kind: agentlaunch.NativeFileSkill, ID: "code-review", Content: body},
+	}}
+	compiled := compiledWith(t, "antigravity", agentlaunch.RuntimeSubprocess, inj)
+	prepared, err := launcher.Prepare(context.Background(), compiled)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	projectRoot := prepared.Workdir
+	if err := Plant(context.Background(), prepared); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+	bd := prepared.PlantedBootDir
+	for _, f := range []string{"AGENTS.md", "boot.md", ".agents/plugins/tether/plugin.json", ".agents/plugins/tether/mcp_config.json"} {
+		assertExists(t, bd, f)
+	}
+	if got := readFile(t, bd, ".agents/skills/code-review/SKILL.md"); got != body {
+		t.Errorf("planted skill = %q", got)
+	}
+	if prepared.Workdir != bd {
+		t.Errorf("Workdir = %q, want bootdir %q", prepared.Workdir, bd)
+	}
+	if i := slices.Index(prepared.Argv, "--add-dir"); i < 0 || i+1 >= len(prepared.Argv) || prepared.Argv[i+1] != projectRoot {
+		t.Errorf("argv lacks --add-dir <project>: %v", prepared.Argv)
+	}
+	for k := range prepared.Env {
+		if k == "HOME" {
+			t.Errorf("antigravity must not relocate HOME")
+		}
+	}
+}
+
 // TestPlant_MatrixCombinations exercises every legal provider×runtime
 // pair end to end: each must plant without error and leave a non-empty
 // bootdir.
@@ -132,6 +170,7 @@ func TestPlant_MatrixCombinations(t *testing.T) {
 		{"codex", agentlaunch.RuntimeSubprocess},
 		{"codex", agentlaunch.RuntimeJsonRpcStdio},
 		{"opencode", agentlaunch.RuntimeSubprocess},
+		{"antigravity", agentlaunch.RuntimeSubprocess},
 	}
 	for _, p := range pairs {
 		t.Run(p.provider+"/"+string(p.runtime), func(t *testing.T) {

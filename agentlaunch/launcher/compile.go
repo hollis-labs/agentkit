@@ -116,6 +116,9 @@ func WithSourceCatalog(name, version string) CompileOption {
 //     config from config.toml; the MCP descriptor lives alongside).
 //   - opencode → OPENCODE.md (transient) + .mcp.json (opencode reads its
 //     per-session prompt from OPENCODE.md; the MCP descriptor is shared).
+//   - antigravity → AGENTS.md + .agents/plugins/tether/mcp_config.json
+//     (agy reads rules from AGENTS.md and MCP servers from a workspace
+//     plugin; it has no config-dir variable).
 //
 // Phase 3 hook implementations may override these defaults; the
 // compiler's job is to provide a sensible starting layout the preparer
@@ -222,6 +225,12 @@ func bootDirIntentFor(r matrix.BootDirRenderer) agentlaunch.BootDirIntent {
 			PerProviderBootFile: "",
 			TransientBootFile:   "OPENCODE.md",
 			MCPDescriptorFile:   ".mcp.json",
+		}
+	case matrix.BootDirRendererAntigravity:
+		return agentlaunch.BootDirIntent{
+			PerProviderBootFile: "AGENTS.md",
+			TransientBootFile:   "",
+			MCPDescriptorFile:   ".agents/plugins/tether/mcp_config.json",
 		}
 	default:
 		return agentlaunch.BootDirIntent{}

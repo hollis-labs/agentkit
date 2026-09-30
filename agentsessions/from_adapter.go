@@ -11,6 +11,7 @@ import (
 
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/provider/events"
 	"github.com/hollis-labs/go-runner/runner"
 )
 
@@ -108,11 +109,18 @@ func (r *adapterRuntime) Kind() string       { return r.cfg.Kind }
 func (r *adapterRuntime) Caps() Capabilities { return r.cfg.Caps }
 
 func (r *adapterRuntime) Prepare(ctx context.Context) error {
-	if !r.cfg.Caps.BinaryRequired {
-		return nil
+	if r.cfg.Caps.BinaryRequired {
+		if _, ok := r.cfg.Adapter.Detect(); !ok {
+			return fmt.Errorf("agentsessions: adapter %q binary not found", r.cfg.Adapter.Name())
+		}
 	}
-	if _, ok := r.cfg.Adapter.Detect(); !ok {
-		return fmt.Errorf("agentsessions: adapter %q binary not found", r.cfg.Adapter.Name())
+	// A preflight refusal (for example, missing credentials that would
+	// otherwise send the CLI into an interactive login) keeps the session
+	// from starting at all.
+	if p, ok := r.cfg.Adapter.(provider.Preflighter); ok {
+		if err := p.Preflight(); err != nil {
+			return fmt.Errorf("agentsessions: adapter %q preflight: %w", r.cfg.Adapter.Name(), err)
+		}
 	}
 	return nil
 }
@@ -221,6 +229,14 @@ type adapterSession struct {
 	// with the rest of this struct's fields.
 	turnSawTerminal atomic.Bool
 
+	// Per-turn resume bookkeeping for provider.SessionResumeVerifier
+	// adapters. Written at the top of SendInput and read from
+	// handleRunnerEvent, which go-runner calls synchronously on the turn's
+	// goroutine, so plain fields are safe.
+	turnRequestedID    string
+	turnFirstSessionID string
+	turnSessionLost    bool
+
 	sandboxOutcome atomic.Value // SandboxOutcome
 
 	stopCh   chan struct{}
@@ -287,16 +303,25 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	sessionID, _ := s.sessionID.Load().(string)
 	args := s.buildArgs(prompt, sessionID)
 
-	// A resume turn against an adapter that can recognize a dead resume id
-	// keeps a bounded copy of the turn's stderr for it to inspect; stderr
+	// Adapters that recognize a dead resume id or a login failure from
+	// stderr get a bounded copy of the turn's stderr to inspect; stderr
 	// still reaches StartOptions.Stderr unchanged.
 	stderr := s.opts.Stderr
 	classifier, canClassify := s.adapter.(provider.SessionLostClassifier)
+	authClassifier, canClassifyAuth := s.adapter.(provider.AuthFailureClassifier)
+	verifier, canVerify := s.adapter.(provider.SessionResumeVerifier)
+	resumeVerified := canVerify && verifier.ResumeKeepsSessionID() && sessionID != ""
 	var stderrTail *tailWriter
-	if canClassify && sessionID != "" {
+	if (canClassify && sessionID != "") || canClassifyAuth {
 		stderrTail = &tailWriter{w: stderr, max: sessionLostTailBytes}
 		stderr = stderrTail
 	}
+	s.turnRequestedID = ""
+	if resumeVerified {
+		s.turnRequestedID = sessionID
+	}
+	s.turnFirstSessionID = ""
+	s.turnSessionLost = false
 
 	turnID := defaultIDFn()
 	s.turnID.Store(turnID)
@@ -316,7 +341,7 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	}()
 
 	cfg := runner.Config{
-		Provider:      s.adapter,
+		Provider:      s.turnAdapter(),
 		SandboxPolicy: s.opts.SandboxPolicy,
 		Profile:       s.opts.Profile,
 		Workspace:     s.opts.Workdir,
@@ -347,9 +372,20 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	// next SendInput starts a fresh provider session. Whether to resend
 	// this prompt without the lost history is the caller's decision, so
 	// the error says what happened instead of retrying here.
-	if err != nil && stderrTail != nil && classifier.IsSessionLost(stderrTail.Bytes()) {
+	if err != nil && canClassify && stderrTail != nil && sessionID != "" && classifier.IsSessionLost(stderrTail.Bytes()) {
 		s.sessionID.CompareAndSwap(sessionID, "")
 		err = fmt.Errorf("agentsessions: provider session %q: %w: %w", sessionID, provider.ErrProviderSessionLost, err)
+	}
+	if err != nil && canClassifyAuth && stderrTail != nil && authClassifier.IsNotAuthenticated(stderrTail.Bytes()) {
+		err = fmt.Errorf("agentsessions: %w: %w", provider.ErrProviderNotAuthenticated, err)
+	}
+	// Secondary signal for an id-keeping adapter: the turn reported no
+	// session id at all, but stderr says the requested session was not
+	// found. A turn that reported the requested id kept it, whatever
+	// stderr says.
+	if resumeVerified && !s.turnSessionLost && s.turnFirstSessionID == "" && canClassify && stderrTail != nil && classifier.IsSessionLost(stderrTail.Bytes()) {
+		s.sessionID.CompareAndSwap(sessionID, "")
+		s.reportSessionLost(sessionID, s.turnFirstSessionID)
 	}
 
 	// runner.Run has fully returned — cfg.OnEvent (handleRunnerEvent) has
@@ -415,10 +451,15 @@ func (s *adapterSession) handleRunnerEvent(ev runner.Event) {
 		}
 	case runner.EventProviderEvent:
 		if pe, ok := ev.Payload["event"].(llmtypes.StreamEvent); ok {
+			firstReplacement := false
 			if pe.Type == llmtypes.EventSessionID && pe.SessionID != "" {
 				s.sessionID.Store(pe.SessionID)
 				if s.opts.OnSessionID != nil {
 					s.opts.OnSessionID(pe.SessionID)
+				}
+				if s.turnFirstSessionID == "" {
+					s.turnFirstSessionID = pe.SessionID
+					firstReplacement = s.turnRequestedID != "" && pe.SessionID != s.turnRequestedID
 				}
 			}
 			if pe.Type == llmtypes.EventDone || pe.Type == llmtypes.EventError {
@@ -432,6 +473,11 @@ func (s *adapterSession) handleRunnerEvent(ev runner.Event) {
 				if line, ok := encodeStreamEvent(pe); ok {
 					_, _ = s.opts.Fanout.Write(line)
 				}
+			}
+			// Reported after the new id itself, and before anything else
+			// the turn emits.
+			if firstReplacement {
+				s.reportSessionLost(s.turnRequestedID, pe.SessionID)
 			}
 		}
 	case runner.EventProcessExited:
@@ -473,6 +519,65 @@ func (s *adapterSession) CheckpointHints() (CheckpointHint, bool) {
 func (s *adapterSession) ProviderSessionID() string {
 	id, _ := s.sessionID.Load().(string)
 	return id
+}
+
+// sessionLostReason is the reason reported with a replaced session.
+const sessionLostReason = "requested provider session not found; the provider started a new session"
+
+// reportSessionLost announces, once per turn, that a resume turn is running
+// in a new provider session: to OnProviderSessionLost, the typed-event
+// callback (events.SessionLost) and the byte Fanout, as a
+// "[session_lost] ..." marker in the style of its other markers. It does
+// not fail the turn.
+func (s *adapterSession) reportSessionLost(requested, actual string) {
+	if s.turnSessionLost {
+		return
+	}
+	s.turnSessionLost = true
+	if s.opts.OnProviderSessionLost != nil {
+		s.opts.OnProviderSessionLost(requested, actual, sessionLostReason)
+	}
+	if s.opts.TypedEventCallback != nil {
+		s.opts.TypedEventCallback(events.SessionLost{RequestedID: requested, ActualID: actual, Reason: sessionLostReason})
+	}
+	if s.opts.Fanout != nil {
+		_, _ = fmt.Fprintf(s.opts.Fanout, "\n[session_lost] requested=%s actual=%s: %s\n", requested, actual, sessionLostReason)
+	}
+}
+
+// turnAdapter is the adapter handed to go-runner for one turn. When the
+// caller wants typed events and the adapter can produce them, it is tapped
+// so each stdout line also goes through ParseLineEvents; go-runner parses
+// lines on the turn's goroutine, so typed and legacy events stay in line
+// order.
+func (s *adapterSession) turnAdapter() provider.CLIAdapter {
+	cb := s.opts.TypedEventCallback
+	parser, ok := s.adapter.(provider.EventParser)
+	if cb == nil || !ok {
+		return s.adapter
+	}
+	return &typedEventTap{CLIAdapter: s.adapter, parser: parser, cb: cb, fanout: s.opts.Fanout}
+}
+
+type typedEventTap struct {
+	provider.CLIAdapter
+	parser provider.EventParser
+	cb     provider.EventsCallback
+	fanout io.Writer
+}
+
+func (t *typedEventTap) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
+	if evs, err := t.parser.ParseLineEvents(line); err == nil {
+		for _, ev := range evs {
+			t.cb(ev)
+			// Permission denials have no StreamEvent form; mark them on
+			// the byte Fanout so an attached reader sees the no-op.
+			if d, ok := ev.(events.PermissionDenied); ok && t.fanout != nil {
+				_, _ = fmt.Fprintf(t.fanout, "\n[permission_denied:%s] %s\n", d.Action, d.DisplayName)
+			}
+		}
+	}
+	return t.CLIAdapter.ParseLine(line)
 }
 
 // sessionLostTailBytes bounds the stderr kept per resume turn for a

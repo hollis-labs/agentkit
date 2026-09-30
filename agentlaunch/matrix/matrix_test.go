@@ -242,7 +242,7 @@ func TestLookupBinaryOverrideWhitespace(t *testing.T) {
 	}
 }
 
-// TestSupportedShape verifies Supported() lists exactly the seven legal
+// TestSupportedShape verifies Supported() lists exactly the eight legal
 // pairs and that each is reported as supported by IsSupported.
 //
 // opencode/serve-http added in v0.4.0 alongside go-agent-sessions v0.10.0
@@ -250,15 +250,15 @@ func TestLookupBinaryOverrideWhitespace(t *testing.T) {
 // for V2-pipeline long-lived opencode workers.
 func TestSupportedShape(t *testing.T) {
 	pairs := Supported()
-	if len(pairs) != 7 {
-		t.Fatalf("Supported() returned %d pairs; want 7", len(pairs))
+	if len(pairs) != 8 {
+		t.Fatalf("Supported() returned %d pairs; want 8", len(pairs))
 	}
 	for _, p := range pairs {
 		if !IsSupported(p.ProviderID, p.Runtime) {
 			t.Errorf("Supported pair %s reported as IsSupported=false", p)
 		}
 	}
-	// Confirm the set is exactly the documented seven (order-independent).
+	// Confirm the set is exactly the documented eight (order-independent).
 	want := map[string]bool{
 		"claude/subprocess":      false,
 		"claude/pty":             false,
@@ -267,6 +267,7 @@ func TestSupportedShape(t *testing.T) {
 		"codex/jsonrpc-stdio":    false,
 		"opencode/subprocess":    false,
 		"opencode/serve-http":    false,
+		"antigravity/subprocess": false,
 	}
 	for _, p := range pairs {
 		key := p.String()
@@ -341,7 +342,7 @@ func TestPairString(t *testing.T) {
 
 // TestKnownProviders verifies the convenience accessor is stable.
 func TestKnownProviders(t *testing.T) {
-	want := []string{"claude", "codex", "opencode"}
+	want := []string{"claude", "codex", "opencode", "antigravity"}
 	got := KnownProviders()
 	if len(got) != len(want) {
 		t.Fatalf("KnownProviders() length = %d, want %d", len(got), len(want))

@@ -122,17 +122,22 @@ const (
 	// BootDirRendererOpencode maps to go-providers' Opencode bootdir
 	// planter (renders agents/<name>.md + AGENTS.md).
 	BootDirRendererOpencode BootDirRenderer = "opencode"
+
+	// BootDirRendererAntigravity maps to go-providers' Antigravity bootdir
+	// planter (AGENTS.md + boot.md + the workspace .agents/plugins/tether
+	// plugin carrying the launch's MCP servers).
+	BootDirRendererAntigravity BootDirRenderer = "antigravity"
 )
 
 // String returns the underlying token (one of "claude", "codex",
-// "opencode"). The zero value returns "".
+// "opencode", "antigravity"). The zero value returns "".
 func (b BootDirRenderer) String() string { return string(b) }
 
-// Valid reports whether the receiver is one of the three declared
+// Valid reports whether the receiver is one of the declared
 // BootDirRenderer constants. The zero value is not valid.
 func (b BootDirRenderer) Valid() bool {
 	switch b {
-	case BootDirRendererClaude, BootDirRendererCodex, BootDirRendererOpencode:
+	case BootDirRendererClaude, BootDirRendererCodex, BootDirRendererOpencode, BootDirRendererAntigravity:
 		return true
 	default:
 		return false

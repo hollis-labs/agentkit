@@ -82,7 +82,7 @@ func runtimeKindForProviderMode(mode provider.ProviderMode) RuntimeKind {
 
 func runtimeEffectKind(kind provider.ProviderEffectKind) RuntimeEffectKind {
 	switch kind {
-	case provider.EffectCodexAuthJSON, provider.EffectOpencodeProviderAuth:
+	case provider.EffectCodexAuthJSON, provider.EffectOpencodeProviderAuth, provider.EffectAntigravityAuth:
 		return RuntimeEffectCredential
 	case provider.EffectClaudeWorkspaceTrust:
 		return RuntimeEffectHostConfig

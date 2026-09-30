@@ -80,9 +80,10 @@ var (
 // than a registry lookup so unknown IDs surface as compile-time test
 // failures when this file changes.
 const (
-	ProviderClaude   = "claude"
-	ProviderCodex    = "codex"
-	ProviderOpencode = "opencode"
+	ProviderClaude      = "claude"
+	ProviderCodex       = "codex"
+	ProviderOpencode    = "opencode"
+	ProviderAntigravity = "antigravity"
 )
 
 // Pair is a single (ProviderID, Runtime) tuple in the legal-pairs list.
@@ -178,13 +179,23 @@ var legalPairs = []entry{
 		bootRenderer: BootDirRendererOpencode,
 		binary:       "opencode",
 	},
+	{
+		// antigravity × subprocess: `agy --output-format stream-json -p=<prompt>`
+		// per turn (go-providers AntigravityAdapter), cwd = bootdir with the
+		// workspace .agents/ projection and the project via --add-dir.
+		provider:     ProviderAntigravity,
+		runtime:      agentlaunch.RuntimeSubprocess,
+		caps:         Capabilities{BinaryRequired: true},
+		bootRenderer: BootDirRendererAntigravity,
+		binary:       "agy",
+	},
 }
 
 // knownProviders is the lowercased set of provider IDs that appear in
 // the legal-pairs list. Cached at package init so the per-call hot path
 // is a single map lookup.
 var knownProviders = func() map[string]struct{} {
-	m := make(map[string]struct{}, 3)
+	m := make(map[string]struct{}, 4)
 	for _, e := range legalPairs {
 		m[e.provider] = struct{}{}
 	}
@@ -197,7 +208,7 @@ var knownProviders = func() map[string]struct{} {
 //
 // Returns ErrUnknownRuntime when runtime.Valid() is false.
 // Returns ErrUnknownProvider when the normalized provider ID is not one
-// of the three known IDs ("claude", "codex", "opencode").
+// of the known IDs ("claude", "codex", "opencode", "antigravity").
 // Returns ErrUnsupportedCombo when both inputs are individually known
 // but the pair is not in the legal-pairs list.
 //

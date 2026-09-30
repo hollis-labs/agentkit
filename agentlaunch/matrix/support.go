@@ -3,7 +3,8 @@ package matrix
 import "github.com/hollis-labs/agentkit/agentlaunch"
 
 // KnownProviders returns the lowercased set of provider IDs the matrix
-// understands, in stable order ("claude", "codex", "opencode"). The
+// understands, in stable order ("claude", "codex", "opencode",
+// "antigravity"). The
 // returned slice is a fresh copy; callers may sort or filter without
 // affecting the matrix's internal state.
 //
@@ -12,7 +13,7 @@ import "github.com/hollis-labs/agentkit/agentlaunch"
 // Consumers iterating providers for admin / introspection endpoints use
 // this list as the authoritative "what the matrix can launch" set.
 func KnownProviders() []string {
-	return []string{ProviderClaude, ProviderCodex, ProviderOpencode}
+	return []string{ProviderClaude, ProviderCodex, ProviderOpencode, ProviderAntigravity}
 }
 
 // KnownRuntimes returns the five runtime kinds the matrix accepts (one
