@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Changed — agentsessions (behavior)
+
+- `EventUsage` no longer counts as a turn's terminal event; only
+  `EventDone`/`EventError` do. A turn that reports usage and then exits
+  without its own terminal event now gets a synthesized `EventDone` on a
+  clean exit and `EventError` on a crash (before, usage suppressed both, so
+  a crash after usage went unreported). Needed for go-providers' structured
+  OpenCode run mode, which reports usage per step. Audit: no other
+  go-providers or go-agent-wrapper adapter emits usage without done.
+- Lost provider sessions: on a resume turn whose adapter implements
+  go-providers' `SessionLostClassifier`, the session keeps the last 4KB of
+  the turn's stderr (still forwarded to `StartOptions.Stderr`). When the
+  turn fails and the adapter recognizes the tail, the stored provider
+  session id is cleared and `SendInput` returns an error wrapping
+  `provider.ErrProviderSessionLost`; the next turn starts a fresh session.
+  No automatic retry.
+
+### Fixed — agentlaunch
+
+- OpenCode `NativeFileSkill` files are planted at `skills/<id>/SKILL.md`
+  (both `providerplant` and the materializer). The old
+  `.opencode/skills/<id>.md` was never read by opencode: flat files are
+  ignored, and a bootdir `.opencode/` tree is only scanned when cwd is the
+  bootdir. Skill content should carry a frontmatter `name`.
+
 ### Changed
 
 - Raised the module's `go` directive to `1.26.6` (Go floor across the portfolio); CI now uses `go-version-file: go.mod`.
