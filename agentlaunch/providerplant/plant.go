@@ -388,7 +388,11 @@ func skillRelPath(providerID, name string) string {
 	case "claude":
 		return ".claude/skills/" + name + ".md"
 	case "opencode":
-		return ".opencode/skills/" + name + ".md"
+		// OPENCODE_CONFIG_DIR is the bootdir and cwd is the project, so
+		// opencode scans <bootdir>/skills/<name>/SKILL.md; a flat file or
+		// a bootdir .opencode/skills tree is never read (opencode 1.18.30,
+		// go-providers layout probe O2).
+		return "skills/" + name + "/SKILL.md"
 	default:
 		return "skills/" + name + ".md"
 	}
