@@ -4,9 +4,16 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.7.0 — 2026-09-30
 
-### Changed — agentsessions (behavior)
+Breaking in two places: the `artifact` / `materialize` packages leave
+agentkit, and `agentsessions` no longer treats usage as a terminal event.
+Direct importers of `agentkit/artifact` or `agentkit/materialize` must
+switch to `github.com/hollis-labs/go-materialize/...`. Known importers:
+Nanite `internal/runtime/agent/bootdir_claude.go`, `bootdir_hooks.go`,
+`bootdir_plant.go` and `bootdir_plant_test.go`.
+
+### Changed — agentsessions (BREAKING behavior)
 
 - `EventUsage` no longer counts as a turn's terminal event; only
   `EventDone`/`EventError` do. A turn that reports usage and then exits
@@ -31,7 +38,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ignored, and a bootdir `.opencode/` tree is only scanned when cwd is the
   bootdir. Skill content should carry a frontmatter `name`.
 
-### Changed
+### Changed — BREAKING (packages moved)
 
 - Raised the module's `go` directive to `1.26.6` (Go floor across the portfolio); CI now uses `go-version-file: go.mod`.
 - `artifact` and `materialize` moved out to their own module,
@@ -47,6 +54,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as part of that move (breaking: a manifest written by a pre-cutover
   agentkit is not found by `Reconcile`/`Refresh` after upgrading; the
   next `Create` rewrites it at the new path).
+
+### Dependencies
+
+- go-materialize v0.1.0 (first tag; replaces the pseudo-version) and
+  go-providers v0.28.0 (structured OpenCode run mode,
+  `SessionLostClassifier`). go-runner v0.7.0 and go-sandbox v0.3.0 are
+  unchanged.
 
 ## v0.6.1 — 2026-09-06
 
