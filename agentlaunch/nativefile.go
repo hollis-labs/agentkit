@@ -13,7 +13,9 @@ const (
 	// resolves NativeFile.ID to the provider's skill convention:
 	//
 	//   - claude   → .claude/skills/<ID>.md
-	//   - opencode → .opencode/skills/<ID>.md
+	//   - opencode → skills/<ID>/SKILL.md (under OPENCODE_CONFIG_DIR;
+	//     opencode keys the skill on a frontmatter `name` and drops a
+	//     SKILL.md without one, so Content should carry it)
 	//   - codex / others → skills/<ID>.md (no native skill dir; planted
 	//     under a neutral skills/ directory for inspection parity)
 	//

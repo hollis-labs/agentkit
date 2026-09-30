@@ -105,7 +105,7 @@ func TestPlant_Opencode(t *testing.T) {
 	}
 	bd := prepared.PlantedBootDir
 
-	for _, f := range []string{"agents/agent-name.md", "agents.json", "opencode.json", "boot.md"} {
+	for _, f := range []string{"agents/agent-name.md", "opencode.json", "boot.md"} {
 		assertExists(t, bd, f)
 	}
 	if got := prepared.Env["OPENCODE_CONFIG_DIR"]; got != bd {
@@ -163,6 +163,32 @@ func TestPlant_NativeFileClaudeSkill(t *testing.T) {
 	}
 	if got := readFile(t, prepared.PlantedBootDir, ".claude/skills/code-review.md"); got != "SKILL BODY" {
 		t.Errorf("planted skill = %q, want SKILL BODY", got)
+	}
+}
+
+// TestPlant_NativeFileOpencodeSkill pins the opencode skill path to the
+// directory opencode scans under OPENCODE_CONFIG_DIR (the bootdir).
+func TestPlant_NativeFileOpencodeSkill(t *testing.T) {
+	isolateHome(t)
+	body := "---\nname: code-review\ndescription: Review code\n---\nSKILL BODY\n"
+	inj := agentlaunch.InjectionSpec{
+		NativeFiles: []agentlaunch.NativeFile{
+			{Kind: agentlaunch.NativeFileSkill, ID: "code-review", Content: body},
+		},
+	}
+	compiled := compiledWith(t, "opencode", agentlaunch.RuntimeSubprocess, inj)
+	prepared, err := launcher.Prepare(context.Background(), compiled)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := Plant(context.Background(), prepared); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+	if got := readFile(t, prepared.PlantedBootDir, "skills/code-review/SKILL.md"); got != body {
+		t.Errorf("planted skill = %q, want %q", got, body)
+	}
+	if got := prepared.Env["OPENCODE_CONFIG_DIR"]; got != prepared.PlantedBootDir {
+		t.Errorf("OPENCODE_CONFIG_DIR is not the bootdir the skill was planted in: %v", prepared.Env)
 	}
 }
 

@@ -385,7 +385,7 @@ func (m *DefaultMaterializer) renderObject(
 //   - raw injections write verbatim at the declared RelPath;
 //   - skill injections route to the provider-native skill directory keyed
 //     off the BootSpec runtime binding's Provider, mirroring the
-//     providerplant convention (.claude/skills, .opencode/skills, neutral
+//     providerplant convention (.claude/skills, opencode skills/<name>/SKILL.md, neutral
 //     skills/ otherwise). The harness-specific path convention is a stable
 //     library mechanism, not consumer content.
 func injectionRelPath(runtime RuntimeBinding, inj BootInjectionSpec) (string, error) {
@@ -409,7 +409,11 @@ func skillRelPath(provider, name string) string {
 	case "claude":
 		return ".claude/skills/" + name + ".md"
 	case "opencode":
-		return ".opencode/skills/" + name + ".md"
+		// OPENCODE_CONFIG_DIR is the bootdir and cwd is the project, so
+		// opencode scans <bootdir>/skills/<name>/SKILL.md; a flat file or
+		// a bootdir .opencode/skills tree is never read (opencode 1.18.30,
+		// go-providers layout probe O2).
+		return "skills/" + name + "/SKILL.md"
 	default:
 		return "skills/" + name + ".md"
 	}
