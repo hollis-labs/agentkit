@@ -6,8 +6,8 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/hollis-labs/go-llm-contracts v0.3.0
 	github.com/hollis-labs/go-llm-types v0.3.0
-	github.com/hollis-labs/go-materialize v0.0.0-20260918203624-4190b433a343
-	github.com/hollis-labs/go-providers v0.26.0
+	github.com/hollis-labs/go-materialize v0.1.0
+	github.com/hollis-labs/go-providers v0.28.0
 	github.com/hollis-labs/go-runner v0.7.0
 	github.com/hollis-labs/go-sandbox v0.3.0
 	gopkg.in/yaml.v3 v3.0.1
