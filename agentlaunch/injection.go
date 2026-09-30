@@ -37,7 +37,7 @@ type InjectionSpec struct {
 	// docs, user-supplied files) the provider bootdir planter writes
 	// into the planted bootdir. Unlike BootDirOverlay — a flat
 	// path→content map — each NativeFile carries a Kind so the planter
-	// can resolve provider-native paths (.claude/skills/<id>.md etc.)
+	// can resolve provider-native paths (.claude/skills/<id>/SKILL.md etc.)
 	// without an app-specific callback. Validated per-entry by
 	// LaunchPlan.Validate. See the NativeFile type and the providerplant
 	// package for planting order and path conventions.

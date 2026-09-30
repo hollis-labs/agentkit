@@ -74,7 +74,7 @@ var (
 
 	// ErrNativeFileMissingID is returned by NativeFile.Validate when a
 	// NativeFileSkill entry has an empty ID — the ID is required because
-	// it derives the planted filename (.claude/skills/<ID>.md etc.).
+	// it derives the planted filename (.claude/skills/<ID>/SKILL.md etc.).
 	ErrNativeFileMissingID = errors.New("agentlaunch: native skill file missing id")
 
 	// ErrNativeFileUnsafeID is returned by NativeFile.Validate when a

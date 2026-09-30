@@ -115,6 +115,10 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 	if !errors.Is(err, provider.ErrProviderSessionLost) {
 		t.Fatalf("turn N err = %v; want ErrProviderSessionLost", err)
 	}
+	var lost *SessionLostError
+	if !errors.As(err, &lost) || lost.RequestedID == "" || lost.Err == nil {
+		t.Fatalf("turn N err = %#v; want *SessionLostError carrying RequestedID and Err", err)
+	}
 	if !strings.Contains(err.Error(), "ses_dead") {
 		t.Errorf("turn N err %q does not name the lost id", err)
 	}

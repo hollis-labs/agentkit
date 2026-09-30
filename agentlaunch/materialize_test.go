@@ -150,7 +150,7 @@ func TestPopulateShapesContractObjectsPerHarness(t *testing.T) {
 		provider      string
 		wantSkillPath string
 	}{
-		{"claude", ".claude/skills/code-review.md"},
+		{"claude", ".claude/skills/code-review/SKILL.md"},
 		{"opencode", "skills/code-review/SKILL.md"},
 		{"codex", "skills/code-review.md"},
 	}

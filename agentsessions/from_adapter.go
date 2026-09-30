@@ -374,7 +374,7 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	// the error says what happened instead of retrying here.
 	if err != nil && canClassify && stderrTail != nil && sessionID != "" && classifier.IsSessionLost(stderrTail.Bytes()) {
 		s.sessionID.CompareAndSwap(sessionID, "")
-		err = fmt.Errorf("agentsessions: provider session %q: %w: %w", sessionID, provider.ErrProviderSessionLost, err)
+		err = &SessionLostError{RequestedID: sessionID, Err: err}
 	}
 	if err != nil && canClassifyAuth && stderrTail != nil && authClassifier.IsNotAuthenticated(stderrTail.Bytes()) {
 		err = fmt.Errorf("agentsessions: %w: %w", provider.ErrProviderNotAuthenticated, err)

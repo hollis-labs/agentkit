@@ -200,7 +200,7 @@ func TestPlant_NativeFileClaudeSkill(t *testing.T) {
 	if err := Plant(context.Background(), prepared); err != nil {
 		t.Fatalf("plant: %v", err)
 	}
-	if got := readFile(t, prepared.PlantedBootDir, ".claude/skills/code-review.md"); got != "SKILL BODY" {
+	if got := readFile(t, prepared.PlantedBootDir, ".claude/skills/code-review/SKILL.md"); got != "SKILL BODY" {
 		t.Errorf("planted skill = %q, want SKILL BODY", got)
 	}
 }

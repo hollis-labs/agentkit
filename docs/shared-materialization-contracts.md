@@ -14,7 +14,7 @@ This document records the library ownership and compatibility matrix for the sha
 | `artifact` | Provider-neutral file/directory/tree entries, immutable content references, modes, digests, provenance, source resolver contract | Provider layout rules, session launch, child process access grants |
 | `materialize` | Create/reconcile/refresh/plan request shape, target roots, owned manifest, change reports, engine interface | Provider semantics, real OS sandbox enforcement, app retention policy |
 | `agentlaunch` | Prepared execution handoff, structured argv/env/cwd, runtime roots, explicit effects, access requirements, diagnostics, legacy compatibility markers | go-sandbox backend implementation, live credential reads in pure projection |
-| `go-providers` | Pure provider projection values and serializers for Claude, Codex and OpenCode | `agentkit` imports or filesystem mutation |
+| `go-providers` | Pure provider projection values and serializers for Claude, Codex, OpenCode and Antigravity | `agentkit` imports or filesystem mutation |
 | `go-sandbox` | Resolved access policy and pre-spawn enforcement capabilities | Composition, provider projection, materialization |
 | `go-runner` | Passing resolved sandbox policy through every process start/restart path | Provider layouts or a second materializer |
 | `go-agent-wrapper` | Orchestration over prepared/convenience inputs and provider process lifecycle | App adoption policy or duplicate planting engines |

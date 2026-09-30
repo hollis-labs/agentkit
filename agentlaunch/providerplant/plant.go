@@ -386,7 +386,7 @@ func nativeFileRelPathByProvider(providerID string, nf agentlaunch.NativeFile) (
 func skillRelPath(providerID, name string) string {
 	switch strings.ToLower(providerID) {
 	case "claude":
-		return ".claude/skills/" + name + ".md"
+		return ".claude/skills/" + name + "/SKILL.md"
 	case "opencode":
 		// OPENCODE_CONFIG_DIR is the bootdir and cwd is the project, so
 		// opencode scans <bootdir>/skills/<name>/SKILL.md; a flat file or

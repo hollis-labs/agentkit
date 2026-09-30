@@ -12,7 +12,7 @@ const (
 	// NativeFileSkill is a provider-native "skill" document. The planter
 	// resolves NativeFile.ID to the provider's skill convention:
 	//
-	//   - claude   → .claude/skills/<ID>.md
+	//   - claude   → .claude/skills/<ID>/SKILL.md
 	//   - opencode → skills/<ID>/SKILL.md (under OPENCODE_CONFIG_DIR;
 	//     opencode keys the skill on a frontmatter `name` and drops a
 	//     SKILL.md without one, so Content should carry it)

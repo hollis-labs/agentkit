@@ -4,6 +4,35 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.0 — 2026-09-30
+
+Minor. One behavior change (the Claude skill path) and one additive type.
+
+### Fixed
+
+- **Claude skills are planted where Claude reads them.** `NativeFileSkill` for
+  `claude` planted the flat file `.claude/skills/<id>.md`, which Claude Code
+  (2.1.x) does not load; it reads the directory form
+  `.claude/skills/<id>/SKILL.md`. Both copies of the mapping —
+  `providerplant` and the `agentlaunch` materializer — now plant the directory
+  form, as the OpenCode and Antigravity mappings already did. A consumer that
+  read the flat path back from a planted boot directory must read the new path.
+
+### Added
+
+- **`agentsessions.SessionLostError`** (`RequestedID`, `ActualID`, `Err`): the
+  error a resume turn fails with when the provider no longer has the session.
+  `errors.Is(err, provider.ErrProviderSessionLost)` still holds and the message
+  text is unchanged, so existing checks keep working; consumers can now read
+  the lost id with `errors.As` instead of parsing the message. `ActualID` is
+  empty on this path, where the turn fails rather than continuing in a new
+  session (that case is still reported through `events.SessionLost`).
+
+### Changed
+
+- Docs: the shared materialization contract now names Antigravity among the
+  providers go-providers projects.
+
 ## v0.8.0 — 2026-09-30
 
 Minor: additive. No existing API is removed. Behavior changes only for
