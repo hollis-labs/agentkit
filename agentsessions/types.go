@@ -412,6 +412,16 @@ type StartOptions struct {
 	// callers must not block inside it.
 	OnSessionID func(id string)
 
+	// OnProviderSessionLost, when non-nil, is invoked once per turn when a
+	// resume turn did not continue the requested provider session but ran
+	// in a new one, which the adapter reports by implementing
+	// provider.SessionResumeVerifier (Antigravity starts a new conversation
+	// for an unknown id instead of failing). The turn itself runs on, so
+	// SendInput does not fail; OnSessionID has already reported the new id.
+	// Adapter runtime only. Called from the turn's goroutine — callers must
+	// not block inside it.
+	OnProviderSessionLost func(requestedID, actualID, reason string)
+
 	// AttachEnabled, when true, asks the Manager to spin an attach
 	// broker for this Session. When false, attach calls return
 	// ErrAttachDisabled and no broker memory is allocated. Default off
@@ -461,11 +471,12 @@ type StartOptions struct {
 	//     produce no typed events through this callback (no fallback
 	//     translation in v0.5.0; the legacy EventFanout surface still
 	//     receives ParseLine output).
-	//   - Adapter runtime (Caps.PTY=false, subprocess-per-turn): this field
-	//     is currently NOT consulted. The adapter runtime drives runner.Run
-	//     which surfaces provider events as runner.EventProviderEvent
-	//     (StreamEvent shape). Typed events on the adapter path remain a
-	//     follow-up increment — see CHANGELOG "Out of scope".
+	//   - Adapter runtime (Caps.PTY=false, subprocess-per-turn): the
+	//     callback fires per stdout line when the adapter implements
+	//     provider.EventParser (the adapter is tapped for the turn, so typed
+	//     events arrive in line order alongside ParseLine's), plus the
+	//     session layer's own events.SessionLost. Adapters without
+	//     EventParser produce only events.SessionLost here.
 	//
 	// Sends are synchronous; treat the callback the way you'd treat an
 	// io.Writer's Write — keep the work short or hand off to your own
