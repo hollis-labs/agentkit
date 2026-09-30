@@ -388,6 +388,28 @@ type StartOptions struct {
 	// SandboxPolicy.
 	Profile sandbox.Profile
 
+	// DenyGUILaunch stops the child from launching GUI applications, for
+	// example an agent CLI whose sign-in fallback opens a browser and waits.
+	// It is merged into the effective sandbox rather than stacked on top of it:
+	// onto SandboxPolicy or Profile when one is set, and otherwise (including a
+	// disabled SandboxPolicy) applied as a minimal default-allow profile that carries only this knob (nested
+	// seatbelt profiles fail, so it never wraps a second time). It is enforced
+	// on macOS; where the platform cannot enforce it the launch fails with
+	// ErrGUILaunchDenyUnsupported instead of running unconfined, and
+	// provider-native runtimes, which apply no OS sandbox, reject it the same
+	// way. Set it per platform if you want best-effort behavior.
+	DenyGUILaunch bool
+
+	// EndTurnOnAuthFailure ends a subprocess-per-turn turn as soon as the
+	// adapter's AuthFailureClassifier recognizes a login failure on stderr,
+	// instead of waiting for the CLI to give up (agy waits 60s for a browser
+	// sign-in that will never come). The turn then fails with an error wrapping
+	// provider.ErrProviderNotAuthenticated, as it would have after the wait.
+	// Off by default: it kills the child on a stderr match, so enable it only
+	// for adapters whose markers are definitive. No effect for adapters
+	// without an AuthFailureClassifier.
+	EndTurnOnAuthFailure bool
+
 	// Fanout receives a tee of session output for the attach broker. Set
 	// by the Manager — adapters do not allocate this.
 	Fanout io.Writer

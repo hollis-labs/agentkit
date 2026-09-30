@@ -311,9 +311,20 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	authClassifier, canClassifyAuth := s.adapter.(provider.AuthFailureClassifier)
 	verifier, canVerify := s.adapter.(provider.SessionResumeVerifier)
 	resumeVerified := canVerify && verifier.ResumeKeepsSessionID() && sessionID != ""
+	// The run context exists before stderr is wired so a recognized login
+	// failure can end the turn early (EndTurnOnAuthFailure).
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var stderrTail *tailWriter
 	if (canClassify && sessionID != "") || canClassifyAuth {
 		stderrTail = &tailWriter{w: stderr, max: sessionLostTailBytes}
+		if canClassifyAuth && s.opts.EndTurnOnAuthFailure {
+			stderrTail.onTail = func(tail []byte) {
+				if authClassifier.IsNotAuthenticated(tail) {
+					cancel()
+				}
+			}
+		}
 		stderr = stderrTail
 	}
 	s.turnRequestedID = ""
@@ -330,8 +341,6 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	defer s.state.Store(int32(LiveStateIdle))
 
 	// Cancel the run if Stop fires while the runner is mid-flight.
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	go func() {
 		select {
 		case <-s.stopCh:
@@ -592,6 +601,9 @@ const sessionLostTailBytes = 4096
 type tailWriter struct {
 	w   io.Writer
 	max int
+	// onTail, when set, is called after each write with a copy of the current
+	// tail. It runs on the writer's goroutine without the lock held.
+	onTail func(tail []byte)
 
 	mu  sync.Mutex
 	buf []byte
@@ -604,6 +616,9 @@ func (t *tailWriter) Write(p []byte) (int, error) {
 		t.buf = append(t.buf[:0], t.buf[over:]...)
 	}
 	t.mu.Unlock()
+	if t.onTail != nil {
+		t.onTail(t.Bytes())
+	}
 	if t.w == nil {
 		return len(p), nil
 	}

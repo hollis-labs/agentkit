@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
@@ -17,6 +18,9 @@ var (
 	ErrPreparedRemoteRequired    = errors.New("agentsessions: required prepared confinement cannot be enforced for remote host")
 	ErrSandboxPolicyConflict     = errors.New("agentsessions: sandbox policy inputs conflict")
 	ErrPreparedAccessUnsupported = errors.New("agentsessions: prepared access requirement is unsupported")
+	// ErrGUILaunchDenyUnsupported means StartOptions.DenyGUILaunch was set but
+	// this platform or runtime cannot enforce it, so the launch is refused rather than run unconfined.
+	ErrGUILaunchDenyUnsupported = errors.New("agentsessions: DenyGUILaunch cannot be enforced")
 )
 
 // SandboxOutcome is the session-runtime view of OS confinement for a child.
@@ -105,10 +109,48 @@ func normalizeStartOptions(opts StartOptions) (StartOptions, error) {
 	if opts.SandboxPolicy != nil && opts.SandboxPolicy.ID == "" {
 		return StartOptions{}, errors.New("agentsessions: StartOptions.SandboxPolicy.ID is required")
 	}
+	return applyGUILaunchDeny(opts)
+}
+
+// minimalGUIDenyProfileID names the default-allow profile that carries only
+// the DenyGUILaunch knob when the caller supplied no sandbox of its own.
+const minimalGUIDenyProfileID = "deny-gui-launch"
+
+// applyGUILaunchDeny folds StartOptions.DenyGUILaunch into the one sandbox
+// that will wrap the child. It composes instead of nesting: the knob goes onto
+// an existing SandboxPolicy or Profile (copies, so the caller's values are not
+// mutated), and only when there is neither does it install a minimal
+// default-allow profile. It is idempotent.
+func applyGUILaunchDeny(opts StartOptions) (StartOptions, error) {
+	if !opts.DenyGUILaunch {
+		return opts, nil
+	}
+	caps := sandbox.ResolveBackendCapabilities("", sandbox.BackendAuto)
+	if !caps.Supported || !slices.Contains(caps.Capabilities, sandbox.CapGUILaunchDeny) {
+		return StartOptions{}, fmt.Errorf("%w: the %s sandbox backend on %s cannot deny GUI launch", ErrGUILaunchDenyUnsupported, caps.Backend, caps.GOOS)
+	}
+	switch {
+	case opts.SandboxPolicy != nil && opts.SandboxPolicy.Mode == sandbox.ConfinementDisabled:
+		// An unconfined policy has nothing to merge into. The knob still asks
+		// for one denial, so the child gets the minimal profile and nothing else.
+		opts.SandboxPolicy = nil
+		opts.Profile = sandbox.Profile{ID: minimalGUIDenyProfileID, Net: true, Subprocess: true, DenyGUILaunch: true}
+	case opts.SandboxPolicy != nil:
+		merged := *opts.SandboxPolicy
+		merged.DenyGUILaunch = true
+		opts.SandboxPolicy = &merged
+	case opts.Profile.ID != "":
+		opts.Profile.DenyGUILaunch = true
+	default:
+		opts.Profile = sandbox.Profile{ID: minimalGUIDenyProfileID, Net: true, Subprocess: true, DenyGUILaunch: true}
+	}
 	return opts, nil
 }
 
 func normalizeProviderStartOptions(opts StartOptions) (StartOptions, error) {
+	if opts.DenyGUILaunch {
+		return StartOptions{}, fmt.Errorf("%w: a provider-native runtime applies no OS sandbox", ErrGUILaunchDenyUnsupported)
+	}
 	opts, err := normalizeStartOptions(opts)
 	if err != nil {
 		return StartOptions{}, err
