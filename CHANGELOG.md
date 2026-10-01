@@ -28,6 +28,30 @@ MCP servers flow from the launch plan into every runtime's boot dir
   Apps no longer hand-set the plant's MCP fields or render MCP config
   themselves.
 - A launch without `MCPSpec.Servers` plants byte-identical config.
+## v0.14.2 — 2026-10-01
+
+`ExtraArgs` no longer become prompt text (CW-20261001-0102). The same fix
+ships for the v0.12 line as v0.12.3.
+
+### Fixed
+
+- **Sessions: `StartOptions.ExtraArgs` precede `--`.** Since go-providers
+  v0.34.1 an adapter's argv with a prompt ends in `-- <prompt>`, as on
+  `claude -p`, `codex exec` and `opencode run` turns. Without a launch
+  template, a caller's `ExtraArgs`, and `AutoPlantBootDir`'s project-dir
+  argument (Claude's `--add-dir`), were appended after it, so the agent
+  received them as prompt text. They now go immediately before the first `--`.
+  An argv without a `--` is unchanged, and an `ExtraArgs` that carries its own
+  `--` is appended as before. The launch template path already placed them
+  correctly.
+
+### Tests
+
+- A regression guard: prepared launches keep `Provider.Flags` and
+  `Injection.Args` before `--`, both in the planted argv and in every
+  later turn's argv. agentkit v0.12.x got this wrong. v0.12.3 fixes it on
+  that line.
+
 ## v0.14.1 — 2026-10-01
 
 A child output line over 1 MiB no longer stops a session (CW-20261001-0086).
