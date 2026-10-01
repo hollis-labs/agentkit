@@ -70,7 +70,7 @@ func (r *serveHTTPRuntime) Start(ctx context.Context, opts StartOptions) (Sessio
 		cleanupBootDir(bootDir)
 		return nil, err
 	}
-	logF, err := os.Create(logPath) //nolint:gosec // G304: workspace-managed path
+	logF, err := openSessionLog(logPath)
 	if err != nil {
 		cleanupBootDir(bootDir)
 		return nil, fmt.Errorf("agentsessions: open log: %w", err)

@@ -81,7 +81,7 @@ func (r *jsonRpcStdioRuntime) Start(ctx context.Context, opts StartOptions) (Ses
 		cleanupBootDir(bootDir)
 		return nil, err
 	}
-	logF, err := os.Create(logPath) //nolint:gosec // G304: workspace-managed path
+	logF, err := openSessionLog(logPath)
 	if err != nil {
 		cleanupBootDir(bootDir)
 		return nil, fmt.Errorf("agentsessions: open log: %w", err)
