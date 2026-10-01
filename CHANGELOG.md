@@ -27,7 +27,7 @@ together.
   which used to appear only when a callback was set.
 - Requires go-providers v0.35.0 (block ids, normalised stop reasons,
   per-event `CostUSD`, `events.AuthFailed`) and go-llm-types v0.5.1 (was
-  v0.32.0 / v0.3.0).
+  v0.34.1 / v0.3.0).
 
 ### Decided, not built
 
