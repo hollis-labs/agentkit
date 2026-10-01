@@ -607,11 +607,19 @@ func (s *adapterSession) announceSessionLost(requested, actual, reason string) {
 		return
 	}
 	s.turnSessionLost = true
-	if s.opts.TypedEventCallback != nil {
-		s.opts.TypedEventCallback(events.SessionLost{RequestedID: requested, ActualID: actual, Reason: reason})
+	emitSessionLost(&s.opts, requested, actual, reason)
+}
+
+// emitSessionLost writes a lost provider session to a session's event
+// outputs: the typed events.SessionLost and the byte Fanout's
+// "[session_lost] ..." marker. Callers decide how often (once per turn, or
+// once per session).
+func emitSessionLost(opts *StartOptions, requested, actual, reason string) {
+	if opts.TypedEventCallback != nil {
+		opts.TypedEventCallback(events.SessionLost{RequestedID: requested, ActualID: actual, Reason: reason})
 	}
-	if s.opts.Fanout != nil {
-		_, _ = fmt.Fprintf(s.opts.Fanout, "\n[session_lost] requested=%s actual=%s: %s\n", requested, actual, reason)
+	if opts.Fanout != nil {
+		_, _ = fmt.Fprintf(opts.Fanout, "\n[session_lost] requested=%s actual=%s: %s\n", requested, actual, reason)
 	}
 }
 

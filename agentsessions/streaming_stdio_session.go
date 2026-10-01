@@ -164,6 +164,10 @@ type streamingStdioSession struct {
 	stdin   io.WriteCloser
 	stdout  io.ReadCloser
 	logFile *os.File
+	// stderrCap is the stderr capture of the current attempt, replaced
+	// with cmd under ioLock. It is nil unless the attempt resumes a
+	// provider session of an adapter that can classify a lost one.
+	stderrCap *stderrCapture
 
 	legacyCleanup func()
 
@@ -191,6 +195,11 @@ type streamingStdioSession struct {
 	sandboxOutcome atomic.Value // SandboxOutcome
 
 	lastSessionID atomic.Value // string
+	// lost is set when a resume attempt exited because the provider no
+	// longer has the session (CW-20261001-0222). The session then accepts
+	// no input and is not restarted: a restart would resume the same id
+	// and fail the same way.
+	lost atomic.Pointer[SessionLostError]
 
 	activity activityTracker
 
@@ -290,15 +299,37 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 	}
 	cmd.Stdout = stdoutWriter
 
-	if err := cmd.Start(); err != nil {
+	// An attempt that resumes a provider session gets its stderr through a
+	// pipe of ours, so its tail can be classified when it exits. The caller
+	// still receives every byte.
+	stderrCap, stderrWriter, err := newStderrCapture(s.adapter, cmd.Stderr, sessionIDPreset)
+	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		_ = stdoutWriter.Close()
 		limitCleanup()
 		sandboxCleanup()
+		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stderr pipe: %w", err)
+	}
+	if stderrCap != nil {
+		cmd.Stderr = stderrWriter
+	}
+
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		if stderrCap != nil {
+			stderrCap.abort(stderrWriter)
+		}
+		limitCleanup()
+		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: start: %w", err)
 	}
 	_ = stdoutWriter.Close() // only the child retains the write end
+	if stderrCap != nil {
+		stderrCap.start(stderrWriter)
+	}
 
 	s.reportSandboxOutcome(sandboxOutcome)
 
@@ -306,6 +337,7 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 	s.cmd = cmd
 	s.stdin = stdin
 	s.stdout = stdout
+	s.stderrCap = stderrCap
 	s.ioLock.Unlock()
 
 	if cmd.Process != nil {
@@ -324,6 +356,7 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 			_ = cmd.Wait()
 			_ = stdin.Close()
 			_ = stdout.Close()
+			stderrCap.drain()
 			limitCleanup()
 			if sandboxCleanup != nil {
 				sandboxCleanup()
@@ -343,9 +376,10 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 }
 
 func (s *streamingStdioSession) spawnReaderLegacy(stdout io.Reader) {
+	capture := s.currentStderrCapture() // this attempt's
 	go func() {
 		defer close(s.copyDone)
-		s.runReaderLoop(stdout)
+		s.runReaderLoop(stdout, capture)
 	}()
 }
 
@@ -354,7 +388,7 @@ func (s *streamingStdioSession) spawnReaderLegacy(stdout io.Reader) {
 // paths. Returns at EOF (typically because the child exited and the pipe
 // closed). A line too long to route is skipped and noted, never left in the
 // pipe; a read failure marks the session unusable and keeps draining.
-func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
+func (s *streamingStdioSession) runReaderLoop(stdout io.Reader, capture *stderrCapture) {
 	var sink io.Writer = s.logFile
 	if s.opts.Fanout != nil {
 		sink = io.MultiWriter(s.logFile, s.opts.Fanout)
@@ -377,9 +411,13 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 			for _, ev := range evs {
 				if ev.Type == llmtypes.EventSessionID && ev.SessionID != "" {
 					s.lastSessionID.Store(ev.SessionID)
+					capture.noteProgress()
 					if s.opts.OnSessionID != nil {
 						s.opts.OnSessionID(ev.SessionID)
 					}
+				}
+				if ev.Type == llmtypes.EventDone {
+					capture.noteProgress()
 				}
 				tryEventFanout(s.opts.EventFanout, ev)
 			}
@@ -428,6 +466,7 @@ func drainChildOutput(out io.Closer, readerDone <-chan struct{}) {
 // spawnWaiterLegacy waits for the child, drains stdout, records terminal
 // state, then signals s.done.
 func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser) {
+	stderrCap := s.currentStderrCapture()
 	go func() {
 		err := cmd.Wait()
 
@@ -447,7 +486,16 @@ func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteC
 		s.ioLock.Unlock()
 
 		_ = stdin.Close()
+		// The tail is complete once stderr is drained. The loss is decided
+		// before stdout is drained, which waits for the reader and so for
+		// any callback it is running; a SendInput from such a callback must
+		// find it. It is announced after the provider's own final output.
+		// Both precede the log close (the capture writes to the log) and the
+		// not-alive state (a SendInput that sees it must also see the loss).
+		stderrCap.drain()
+		lost := s.classifyExit(stderrCap, err, s.attemptEnded(context.Background(), ""))
 		drainChildOutput(stdout, s.copyDone)
+		s.announceLost(lost)
 		_ = s.logFile.Close()
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
@@ -531,6 +579,10 @@ func (s *streamingStdioSession) runSupervised(ctx context.Context, firstCmd *exe
 		cleanup()
 		lastExit = exit
 
+		if s.lost.Load() != nil {
+			return // a restart would resume the same lost id and fail again
+		}
+
 		if ctx.Err() != nil || s.isStopRequested() {
 			return
 		}
@@ -570,6 +622,7 @@ func (s *streamingStdioSession) runSupervised(ctx context.Context, firstCmd *exe
 }
 
 func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.ReadCloser, attempt int) *ExitError {
+	stderrCap := s.currentStderrCapture() // this attempt's, before any restart replaces it
 	procDone := make(chan struct{})
 	readerDone := make(chan struct{})
 	cause := &supState{}
@@ -578,7 +631,7 @@ func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exe
 
 	go func() {
 		defer close(readerDone)
-		s.runReaderLoop(stdout)
+		s.runReaderLoop(stdout, stderrCap)
 	}()
 
 	sup := s.opts.Supervisor
@@ -631,7 +684,12 @@ func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exe
 	s.stdout = nil
 	s.ioLock.Unlock()
 	_ = stdin.Close()
+	// Decided before stdout is drained, announced after it: see the legacy
+	// waiter.
+	stderrCap.drain()
+	lost := s.classifyExit(stderrCap, waitErr, s.attemptEnded(ctx, cause.getCause()))
 	drainChildOutput(stdout, readerDone)
+	s.announceLost(lost)
 
 	_ = attempt
 	return buildExitError(cmd.ProcessState, waitErr, cause.getCause())
@@ -772,13 +830,27 @@ func (s *streamingStdioSession) Stop(ctx context.Context) error {
 	return killErr
 }
 
-func (s *streamingStdioSession) SendInput(_ context.Context, data []byte) error {
+func (s *streamingStdioSession) SendInput(ctx context.Context, data []byte) error {
 	if err := s.readerFault.get(); err != nil {
 		return err
+	}
+	// A session whose resume failed because the provider lost the session
+	// takes no more input; the caller starts a new one. The error still
+	// matches ErrNoInputChannel.
+	if lost := s.lost.Load(); lost != nil {
+		return &SessionLostError{RequestedID: lost.RequestedID, Err: ErrNoInputChannel}
 	}
 	if !s.alive.Load() {
 		return ErrNoInputChannel
 	}
+	if err := s.writeInput(data); err != nil {
+		return s.inputFailure(ctx, err)
+	}
+	return nil
+}
+
+// writeInput frames data as one line on the child's stdin.
+func (s *streamingStdioSession) writeInput(data []byte) error {
 	s.ioLock.Lock()
 	defer s.ioLock.Unlock()
 	if s.stdin == nil {

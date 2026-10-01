@@ -85,6 +85,27 @@
 // events.AuthFailed (EndTurnOnAuthFailure ends that turn early). Permission
 // denials parsed from the stream are marked on the byte Fanout.
 //
+// # A lost session on the streaming-stdio runtime
+//
+// A streaming-stdio child started to resume a provider session the provider
+// no longer has exits at once, and its stdout says only that it failed. When
+// the adapter classifies that (provider.SessionLostClassifier) and the attempt
+// resumed an id, the session keeps a bounded tail of that attempt's stderr and
+// classifies it when the child exits abnormally, unless the attempt got going
+// (it emitted a session id or finished a turn) or the session or its
+// supervisor ended it (Stop, a canceled ctx, a supervisor kill). It then reports
+// events.SessionLost once, after the child's final output, with the same
+// "[session_lost]" marker on the byte Fanout; the dead id is no longer the
+// session's ProviderSessionID; SendInput fails with *SessionLostError (which
+// still matches ErrNoInputChannel); and the session is not restarted, since a
+// restart would resume the same id. A SendInput whose write fails because the
+// child just died waits briefly for the classification (ending with its ctx and
+// with Stop), so it reports the loss rather than a broken pipe. Wait's error is
+// unchanged. StartOptions.Stderr, or the session log, still receives every byte
+// of stderr the child wrote before it exited, bar a descendant that keeps
+// stderr open and is cut off after a one-second drain; an attempt that is not
+// a classifiable resume keeps its plain stderr routing.
+//
 // # Process-level State enum
 //
 // The library defines a fixed four-value State enum: launching, running,
