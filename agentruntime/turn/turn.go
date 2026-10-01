@@ -321,17 +321,10 @@ func codexThreadResumeParams(opts CodexAppServerOptions) map[string]any {
 
 // ClaudeStreamingUserFrame emits the exact NDJSON object Claude Code streaming
 // stdio consumes. It deliberately returns no trailing newline; sessions appends
-// the line break at write time.
+// the line break at write time. agentsessions owns the frame, so a prepared
+// launch's boot turn and a consumer's turns are framed the same way.
 func ClaudeStreamingUserFrame(text string) ([]byte, error) {
-	type userMsg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	type frame struct {
-		Type    string  `json:"type"`
-		Message userMsg `json:"message"`
-	}
-	return json.Marshal(frame{Type: "user", Message: userMsg{Role: "user", Content: text}})
+	return agentsessions.ClaudeStreamingUserFrame(text)
 }
 
 func method(opts Options) string {

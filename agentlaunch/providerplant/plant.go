@@ -79,6 +79,7 @@ func Plant(ctx context.Context, prepared *agentlaunch.PreparedLaunch, opts ...Op
 		return err
 	}
 	prepared.Argv = append([]string(nil), execution.Bindings.Argv...)
+	prepared.Launch = execution.Bindings.Launch
 	prepared.Env = envVarMap(execution.Bindings.Env)
 	prepared.Workdir = execution.Bindings.CWD
 	return nil
@@ -110,7 +111,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 	projectDir := projectRootForPrepared(prepared)
 	plantCtx := plantContextFor(prepared, projectDir)
 
-	artifacts, projection, binding, err := projectArtifactsAndBinding(prepared, adapter, plantCtx, projectDir)
+	artifacts, projection, binding, launch, err := projectArtifactsAndBinding(prepared, adapter, plantCtx, projectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 		return nil, fmt.Errorf("agentlaunch/providerplant: materialize: %w", err)
 	}
 
-	argv, err := finalArgv(prepared, projection, binding)
+	argv, err := finalArgv(prepared, projection, binding, launch)
 	if err != nil {
 		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
 	}
@@ -149,6 +150,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 		Materialization: handle,
 		Bindings: agentlaunch.ExecutionBindings{
 			Argv:       argv,
+			Launch:     launch,
 			Env:        env,
 			CWD:        binding.CWD,
 			ConfigRoot: binding.ConfigDir,
@@ -161,6 +163,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 			NativeFile:     len(plan.Injection.NativeFiles) > 0,
 			BootDirOverlay: len(plan.Injection.BootDirOverlay) > 0,
 		},
+		Boot: agentlaunch.BootDelivery{Mode: prepared.BootMode, Prompt: prepared.BootPrompt, Content: prepared.BootContent},
 	}
 	if err := execution.Validate(); err != nil {
 		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
@@ -168,22 +171,42 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 	return execution, nil
 }
 
-func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter provider.BootDirProvider, plantCtx provider.PlantContext, projectDir string) (artifact.Tree, agentlaunch.ProviderProjection, provider.LaunchBinding, error) {
+// projectArtifactsAndBinding renders the provider's files and launch binding.
+// A provider with a projection also returns its launch convention as a
+// TurnTemplate: the binding is that template's first turn (the boot prompt as
+// the prompt, the launch's own flags at the convention's extra-argument slot),
+// and runtimes resolve every turn from the template. A legacy BootDirSpec
+// provider returns no template.
+func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter provider.BootDirProvider, plantCtx provider.PlantContext, projectDir string) (artifact.Tree, agentlaunch.ProviderProjection, provider.LaunchBinding, *agentlaunch.TurnTemplate, error) {
 	plan := prepared.Compiled.Plan
 	bootDir := prepared.PlantedBootDir
 	if pp, ok := adapter.(provider.ProjectionProvider); ok {
 		proj, err := pp.ProviderProjection(plantCtx, provider.ProjectionOptions{Version: plan.Provider.Version})
 		if err != nil {
-			return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, fmt.Errorf("agentlaunch/providerplant: provider projection: %w", err)
+			return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: provider projection: %w", err)
 		}
-		binding, err := proj.ResolveLaunch(provider.ProjectionRoots{ProjectRoot: projectDir, BootRoot: bootDir, ConfigRoot: bootDir, StateRoot: prepared.WorkspaceDir, CWD: projectDir}, bootPromptArg(prepared))
+		launch := &agentlaunch.TurnTemplate{
+			Convention: proj.Launch,
+			Roots:      provider.ProjectionRoots{ProjectRoot: projectDir, BootRoot: bootDir, ConfigRoot: bootDir, StateRoot: prepared.WorkspaceDir, CWD: projectDir},
+			ExtraArgs:  launchExtraArgs(plan),
+		}
+		binding, err := proj.Launch.ResolveTurn(launch.Roots, provider.TurnInput{Prompt: bootPromptArg(prepared)}, launch.ExtraArgs)
 		if err != nil {
-			return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, fmt.Errorf("agentlaunch/providerplant: provider launch binding: %w", err)
+			return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: provider launch binding: %w", err)
 		}
 		translated := agentlaunch.ProviderProjectionFromProvider(proj)
-		return translated.Artifacts, translated, binding, nil
+		return translated.Artifacts, translated, binding, launch, nil
 	}
-	return legacyProjection(prepared, adapter.BootDirSpec(), plantCtx, projectDir)
+	artifacts, projection, binding, err := legacyProjection(prepared, adapter.BootDirSpec(), plantCtx, projectDir)
+	return artifacts, projection, binding, nil, err
+}
+
+// launchExtraArgs are the launch plan's own flags: Provider.Flags, then
+// Injection.Args.
+func launchExtraArgs(plan *agentlaunch.LaunchPlan) []string {
+	extras := make([]string, 0, len(plan.Provider.Flags)+len(plan.Injection.Args))
+	extras = append(extras, plan.Provider.Flags...)
+	return append(extras, plan.Injection.Args...)
 }
 
 func legacyProjection(prepared *agentlaunch.PreparedLaunch, spec provider.BootDirSpec, plantCtx provider.PlantContext, projectDir string) (artifact.Tree, agentlaunch.ProviderProjection, provider.LaunchBinding, error) {
@@ -266,12 +289,13 @@ func upsertArtifact(entries []artifact.Entry, next artifact.Entry) []artifact.En
 	return append(entries, next)
 }
 
-// finalArgv is [binary, projected argv..., Provider.Flags..., Injection.Args...].
-// The projected argv can end in a variadic flag (Claude's --add-dir and
-// --mcp-config take every following non-option token), so the first appended
-// token must be an option: a positional there would be swallowed as one more
-// directory or config. That is ErrPositionalAfterProjection.
-func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding) ([]string, error) {
+// finalArgv is the first turn's argv, binary first. With a launch template the
+// launch's own flags (Provider.Flags, Injection.Args) are already in
+// binding.Argv, at the convention's extra-argument slot; a legacy binding gets
+// them appended. Either way the first of them must be an option: a positional
+// would be read as part of the prompt or as one more value of a variadic flag
+// (Claude's --add-dir). That is ErrPositionalAfterProjection.
+func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding, launch *agentlaunch.TurnTemplate) ([]string, error) {
 	plan := prepared.Compiled.Plan
 	binary := plan.Provider.Binary
 	if binary == "" {
@@ -280,16 +304,16 @@ func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.Prov
 	if binary == "" {
 		binary = projection.Provider
 	}
-	extras := make([]string, 0, len(plan.Provider.Flags)+len(plan.Injection.Args))
-	extras = append(extras, plan.Provider.Flags...)
-	extras = append(extras, plan.Injection.Args...)
+	extras := launchExtraArgs(plan)
 	if len(binding.Argv) > 0 && len(extras) > 0 && !strings.HasPrefix(extras[0], "-") {
-		return nil, fmt.Errorf("%w: %q follows %q", ErrPositionalAfterProjection, extras[0], binding.Argv[len(binding.Argv)-1])
+		return nil, fmt.Errorf("%w: %q is not an option", ErrPositionalAfterProjection, extras[0])
 	}
 	argv := make([]string, 0, 1+len(binding.Argv)+len(extras))
 	argv = append(argv, binary)
 	argv = append(argv, binding.Argv...)
-	argv = append(argv, extras...)
+	if launch == nil {
+		argv = append(argv, extras...)
+	}
 	return argv, nil
 }
 

@@ -56,10 +56,14 @@ type PreparedLaunch struct {
 
 	// Argv is the finalized argv for the spawn, INCLUDING argv[0] (the
 	// binary path). Required: a PreparedLaunch with empty Argv fails
-	// Validate via ErrPreparedMissingArgv. The shim splits Argv[0] into
-	// the binary path and Argv[1:] into StartOptions.Args (the runtime
-	// determines binary vs. args from the adapter's BuildArgs convention).
+	// Validate via ErrPreparedMissingArgv. After providerplant.Plant it is
+	// the first turn's argv; see Launch.
 	Argv []string `yaml:"argv" json:"argv"`
+
+	// Launch is set by providerplant.Plant for a provider with a projected
+	// launch convention: the template every turn's argv is resolved from.
+	// The session shim hands it to the runtime instead of Argv[1:].
+	Launch *TurnTemplate `yaml:"launch,omitempty" json:"launch,omitempty"`
 
 	// BootMode is the boot-mode token forwarded to
 	// StartOptions.BootMode. Empty when the boot profile selected the
