@@ -3,7 +3,6 @@
 package agentsessions
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -311,10 +310,8 @@ func (s *serveHTTPSession) spawn() error {
 }
 
 func (s *serveHTTPSession) scanProcessOutput(r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	err := readLines(r, func(raw []byte) {
+		line := string(raw)
 		s.writeOutput([]byte(line + "\n"))
 		if u := parseServeHTTPListenURL(line); u != "" {
 			select {
@@ -322,6 +319,10 @@ func (s *serveHTTPSession) scanProcessOutput(r io.Reader) {
 			default:
 			}
 		}
+	}, func(n int) { noteOversizeLine(nil, "serve-http", s.runtime.cfg.ID, n) })
+	if readerFailed(err) {
+		// Keep draining so the child never blocks on a full pipe.
+		_, _ = io.Copy(io.Discard, r)
 	}
 }
 
@@ -441,25 +442,26 @@ func (s *serveHTTPSession) runEventStream() {
 // "\n"; an event whose data is empty is not dispatched, and one the
 // stream ends before terminating is dropped.
 func readSSEData(r io.Reader, emit func([]byte)) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var (
 		data    bytes.Buffer
 		hasData bool
+		// broken marks an event one of whose lines was too long to
+		// read; it is dropped rather than dispatched incomplete.
+		broken bool
 	)
-	for scanner.Scan() {
-		line := scanner.Text()
+	_ = readLines(r, func(raw []byte) {
+		line := string(raw)
 		if line == "" {
-			if data.Len() > 0 {
+			if data.Len() > 0 && !broken {
 				emit(data.Bytes())
 			}
 			data.Reset()
-			hasData = false
-			continue
+			hasData, broken = false, false
+			return
 		}
 		chunk, ok := strings.CutPrefix(line, "data")
 		if !ok || (chunk != "" && chunk[0] != ':') {
-			continue // another field, or a comment
+			return // another field, or a comment
 		}
 		chunk = strings.TrimPrefix(strings.TrimPrefix(chunk, ":"), " ")
 		if hasData {
@@ -467,7 +469,10 @@ func readSSEData(r io.Reader, emit func([]byte)) {
 		}
 		data.WriteString(chunk)
 		hasData = true
-	}
+	}, func(n int) {
+		broken = true
+		noteOversizeLine(nil, "serve-http", "event-stream", n)
+	})
 }
 
 func (s *serveHTTPSession) handleSSEData(data []byte) {

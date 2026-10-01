@@ -3,7 +3,6 @@
 package agentsessions
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -188,10 +187,15 @@ type jsonRpcStdioSession struct {
 
 	ioLock sync.Mutex
 
-	state      atomic.Int32
-	alive      atomic.Bool
-	startedPID atomic.Int32
-	lastPID    atomic.Int32
+	state atomic.Int32
+	alive atomic.Bool
+	// readerFault is set when the stdout reader failed; readerExited when
+	// it has stopped for any reason (it is reset when a supervised restart
+	// starts a new reader). A Call needs a reader to receive its response.
+	readerFault  readerFault
+	readerExited atomic.Bool
+	startedPID   atomic.Int32
+	lastPID      atomic.Int32
 	// spawnedAt is the most-recent successful cmd.Start time as unix
 	// nanoseconds. Set inside spawnAttempt after cmd.Start; read by the
 	// waiter paths to compute elapsed-since-spawn for the abnormal-wait
@@ -349,6 +353,7 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 }
 
 func (s *jsonRpcStdioSession) spawnReaderLegacy(stdout io.Reader) {
+	s.readerExited.Store(false)
 	go func() {
 		defer close(s.copyDone)
 		s.runReaderLoop(stdout)
@@ -361,19 +366,18 @@ func (s *jsonRpcStdioSession) spawnReaderLegacy(stdout io.Reader) {
 // via TypedEventCallback / JsonRpcNotificationHook). Frames that fail to
 // parse are written to the log (via Fanout/logFile tee) but otherwise
 // ignored — the spec mandates well-formed frames.
+//
+// The caller clears readerExited before starting it, so the flag is never
+// reset by a reader goroutine that starts late.
 func (s *jsonRpcStdioSession) runReaderLoop(stdout io.Reader) {
 	var sink io.Writer = s.logFile
 	if s.opts.Fanout != nil {
 		sink = io.MultiWriter(s.logFile, s.opts.Fanout)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-
 	_, hasParser := s.adapter.(provider.EventParser)
 
-	for scanner.Scan() {
-		raw := scanner.Bytes()
+	err := readLines(stdout, func(raw []byte) {
 		s.tickActivity()
 		line := make([]byte, len(raw)+1)
 		copy(line, raw)
@@ -383,7 +387,7 @@ func (s *jsonRpcStdioSession) runReaderLoop(stdout io.Reader) {
 		var frame jsonRpcFrame
 		if err := json.Unmarshal(raw, &frame); err != nil {
 			// Non-JSON-RPC line — already logged. Skip frame routing.
-			continue
+			return
 		}
 
 		// Adapter-level ParseLine / ParseLineEvents fire on every line
@@ -429,11 +433,18 @@ func (s *jsonRpcStdioSession) runReaderLoop(stdout io.Reader) {
 			// Response to one of our outbound Calls.
 			s.deliverResponse(*frame.ID, frame.Result, frame.Error)
 		}
-	}
+	}, func(n int) { noteOversizeLine(s.logFile, "jsonrpc-stdio", s.runtime.cfg.ID, n) })
 
-	// Reader exiting (EOF / pipe close) — fail any still-pending calls so
-	// blocked Call goroutines don't leak.
-	s.failPendingOnClose(errors.New("agentsessions: jsonrpc reader exited before response"))
+	pendingErr := errors.New("agentsessions: jsonrpc reader exited before response")
+	if readerFailed(err) {
+		failReader(&s.readerFault, "jsonrpc-stdio", s.runtime.cfg.ID, err, stdout)
+		pendingErr = s.readerFault.get()
+	}
+	// Reader exiting (EOF / pipe close / failure) — fail any still-pending
+	// calls so blocked Call goroutines don't leak, and refuse new ones: no
+	// reader is left to deliver their responses.
+	s.readerExited.Store(true)
+	s.failPendingOnClose(pendingErr)
 }
 
 // deliverResponse routes an inbound response frame to the matching pending
@@ -649,6 +660,7 @@ func (s *jsonRpcStdioSession) waitOnceSupervised(ctx context.Context, cmd *exec.
 	startedAt := time.Now()
 	s.activity.tick()
 
+	s.readerExited.Store(false)
 	go func() {
 		defer close(readerDone)
 		s.runReaderLoop(stdout)
@@ -850,6 +862,9 @@ func (s *jsonRpcStdioSession) Stop(ctx context.Context) error {
 // appends a trailing newline if missing. Most consumers should use Call
 // instead, which handles request encoding + response correlation.
 func (s *jsonRpcStdioSession) SendInput(_ context.Context, data []byte) error {
+	if err := s.readerFault.get(); err != nil {
+		return err
+	}
 	if !s.alive.Load() {
 		return ErrNoInputChannel
 	}
@@ -875,6 +890,9 @@ func (s *jsonRpcStdioSession) SendInput(_ context.Context, data []byte) error {
 // and the in-flight pending entry is removed (a late response from the
 // child will be dropped).
 func (s *jsonRpcStdioSession) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := s.readerFault.get(); err != nil {
+		return nil, err
+	}
 	if !s.alive.Load() {
 		return nil, ErrNoInputChannel
 	}
@@ -888,6 +906,17 @@ func (s *jsonRpcStdioSession) Call(ctx context.Context, method string, params an
 		s.pendMu.Lock()
 		delete(s.pending, id)
 		s.pendMu.Unlock()
+	}
+	// Registered first, checked second: a reader that exits after this
+	// check fails the call through failPendingOnClose; one that exited
+	// before it is caught here. Either way the call does not wait out its
+	// deadline for a response nobody will read.
+	if s.readerExited.Load() {
+		cleanup()
+		if err := s.readerFault.get(); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("agentsessions: jsonrpc reader has exited; no response can be received")
 	}
 
 	// Encode the request frame. Spec field order doesn't matter, but we
@@ -943,7 +972,7 @@ func (s *jsonRpcStdioSession) Health() HealthStatus {
 		pid = int(s.startedPID.Load())
 	}
 	return HealthStatus{
-		Alive: s.alive.Load(),
+		Alive: s.alive.Load() && s.readerFault.get() == nil,
 		PID:   pid,
 		State: LiveState(s.state.Load()),
 	}
