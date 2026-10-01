@@ -11,8 +11,8 @@ github.com/hollis-labs/go-materialize v0.1.0 h1:JQ7nKIlKIaWvuiN1yPpad0dQaJTLocuQ
 github.com/hollis-labs/go-materialize v0.1.0/go.mod h1:ubDxYOfG+hCX0PXQaVm8ssmJoc6ZCDh8iSO46pj0PK0=
 github.com/hollis-labs/go-permission v0.1.0 h1:eOlb2pPmEkh9D5zlVgWwOd4ryycEQYiLT1cLMEG6y2c=
 github.com/hollis-labs/go-permission v0.1.0/go.mod h1:OXz5GXvR7vFAb6TVoGDOESIEecC0V40524NdN0jiOrs=
-github.com/hollis-labs/go-providers v0.32.0 h1:LlCxfUSlmPt9gTxE1JI5FgdglSW3+FTWEhoAemE2PxA=
-github.com/hollis-labs/go-providers v0.32.0/go.mod h1:eDiOX1hTWT60bO+2PVtOoJnTwqz4tKawsw7X0S5B9M0=
+github.com/hollis-labs/go-providers v0.34.1 h1:Ewr5Z7BOpkWZMg3aveV5Z6DI/WxVxWDGVr4krGvcclo=
+github.com/hollis-labs/go-providers v0.34.1/go.mod h1:eDiOX1hTWT60bO+2PVtOoJnTwqz4tKawsw7X0S5B9M0=
 github.com/hollis-labs/go-runner v0.7.0 h1:nJIDnZHBVn1Ii8hITTxLsGMVaEI9AWipar85qo8QkY8=
 github.com/hollis-labs/go-runner v0.7.0/go.mod h1:+PgCa0CxAImd63sZgLb8Zw0uasyDWyHRdcE2sH8Zc7Q=
 github.com/hollis-labs/go-sandbox v0.4.0 h1:1Dv++5ApL09CiDVVD8ny9W6fUeHt9GIotn0LOp8lxd0=

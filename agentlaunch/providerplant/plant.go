@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -266,11 +267,16 @@ func upsertArtifact(entries []artifact.Entry, next artifact.Entry) []artifact.En
 	return append(entries, next)
 }
 
-// finalArgv is [binary, projected argv..., Provider.Flags..., Injection.Args...].
-// The projected argv can end in a variadic flag (Claude's --add-dir and
-// --mcp-config take every following non-option token), so the first appended
-// token must be an option: a positional there would be swallowed as one more
-// directory or config. That is ErrPositionalAfterProjection.
+// finalArgv is [binary, projected flags..., Provider.Flags...,
+// Injection.Args..., projected "--" and positionals...]. Since go-providers
+// v0.34.1 a projected argv with a prompt ends in "-- <prompt>", so the extras
+// go immediately before its first "--"; appended after it they would be
+// prompt text, not flags (CW-20261001-0102). Without a "--" they are
+// appended. The projected flags can end in a variadic flag (Claude's
+// --add-dir and --mcp-config take every following non-option token), so the
+// first extra must be an option: a positional there would be swallowed as one
+// more directory or config. An extra may not be "--" itself, which would turn
+// every later extra into a positional. Both are ErrPositionalAfterProjection.
 func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding) ([]string, error) {
 	plan := prepared.Compiled.Plan
 	binary := plan.Provider.Binary
@@ -283,13 +289,21 @@ func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.Prov
 	extras := make([]string, 0, len(plan.Provider.Flags)+len(plan.Injection.Args))
 	extras = append(extras, plan.Provider.Flags...)
 	extras = append(extras, plan.Injection.Args...)
-	if len(binding.Argv) > 0 && len(extras) > 0 && !strings.HasPrefix(extras[0], "-") {
-		return nil, fmt.Errorf("%w: %q follows %q", ErrPositionalAfterProjection, extras[0], binding.Argv[len(binding.Argv)-1])
+	at := slices.Index(binding.Argv, "--")
+	if at < 0 {
+		at = len(binding.Argv)
+	}
+	if at > 0 && len(extras) > 0 && !strings.HasPrefix(extras[0], "-") {
+		return nil, fmt.Errorf("%w: %q follows %q", ErrPositionalAfterProjection, extras[0], binding.Argv[at-1])
+	}
+	if i := slices.Index(extras, "--"); i >= 0 {
+		return nil, fmt.Errorf("%w: launch flag %d is \"--\", which would end option parsing", ErrPositionalAfterProjection, i)
 	}
 	argv := make([]string, 0, 1+len(binding.Argv)+len(extras))
 	argv = append(argv, binary)
-	argv = append(argv, binding.Argv...)
+	argv = append(argv, binding.Argv[:at]...)
 	argv = append(argv, extras...)
+	argv = append(argv, binding.Argv[at:]...)
 	return argv, nil
 }
 
