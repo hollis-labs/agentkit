@@ -4,6 +4,30 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.15.0 — 2026-10-01
+
+MCP servers flow from the launch plan into every runtime's boot dir
+(CW-20260930-0136, W4a, W4c and item 1). Requires go-providers v0.36.0.
+
+### Added
+
+- **`MCPServerSpec.URL`**: a streamable-HTTP MCP server, beside the stdio
+  `Command`/`Args`/`Env`. Set exactly one; go-providers rejects neither or
+  both when it renders the plant.
+- `PreparedPlantContext.MCPServers`.
+
+### Changed
+
+- **The launcher carries `MCPSpec` into the plant.** `launcher.Prepare` copies
+  `MCPSpec.LoopbackURL` and `MCPSpec.Servers` into `PreparedPlantContext`,
+  where it set only `AgentName`. `providerplant.PlantContextFor` maps them
+  onto go-providers' `PlantContext` (`URL` → `HTTPURL`, env flattened and
+  sorted). The go-providers renderers then plant them, in each CLI's form,
+  into claude's `.mcp.json`, codex's `config.toml`, opencode's
+  `opencode.json` and antigravity's `.agents/plugins/tether/mcp_config.json`.
+  Apps no longer hand-set the plant's MCP fields or render MCP config
+  themselves.
+- A launch without `MCPSpec.Servers` plants byte-identical config.
 ## v0.14.2 — 2026-10-01
 
 `ExtraArgs` no longer become prompt text (CW-20261001-0102). The same fix

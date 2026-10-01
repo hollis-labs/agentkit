@@ -23,25 +23,29 @@ type MCPSpec struct {
 	// bootdir's .mcp.json by go-agent-sessions). Optional.
 	LoopbackURL string `yaml:"loopback_url,omitempty" json:"loopback_url,omitempty"`
 
-	// Servers lists per-session MCP server commands the launcher should
-	// register (subprocess-spawn entries the agent's MCP client probes
-	// at startup). Each entry is rendered into the bootdir .mcp.json.
+	// Servers lists per-session MCP servers the agent's MCP client should
+	// reach, stdio or HTTP. The launcher copies them into the plant
+	// context, and go-providers renders them into each runtime's native
+	// MCP config at the path its layout names (.mcp.json, config.toml,
+	// opencode.json, the agy plugin's mcp_config.json).
 	Servers []MCPServerSpec `yaml:"servers,omitempty" json:"servers,omitempty"`
 }
 
-// MCPServerSpec describes a single MCP server entry rendered into the
-// session's planted .mcp.json. Mirrors the canonical MCP "stdio server"
-// descriptor — name + argv + env. URL-based MCP servers are out of
-// scope for this struct; the LoopbackURL field on MCPSpec covers the
-// single URL case the library cares about today.
+// MCPServerSpec describes a single MCP server the launched agent reaches:
+// a stdio server (Command, Args, Env) or a streamable-HTTP server (URL).
+// Set exactly one of Command and URL; go-providers rejects a spec with
+// neither or both when it renders the plant.
 type MCPServerSpec struct {
 	// Name is the MCP server's stable identifier as the agent sees it.
 	// Required by the catalog port; this library does not enforce
 	// non-emptiness because per-server validation lives in CW-0003.
 	Name string `yaml:"name" json:"name"`
 
-	// Command is the binary the launcher spawns. Resolved against PATH
-	// when relative.
+	// URL is a streamable-HTTP MCP endpoint. Set this XOR Command.
+	URL string `yaml:"url,omitempty" json:"url,omitempty"`
+
+	// Command is the binary the launcher spawns for a stdio server.
+	// Resolved against PATH when relative. Set this XOR URL.
 	Command string `yaml:"command,omitempty" json:"command,omitempty"`
 
 	// Args is the argv (excluding the command itself) handed to the
