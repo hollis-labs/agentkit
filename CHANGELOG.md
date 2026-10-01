@@ -4,6 +4,28 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.5 — 2026-10-01
+
+### Fixed
+
+- **OpenCode serve: the compaction summary no longer reaches the turn as
+  reply text** (CW-20261001-0198). When OpenCode compacts a session, either
+  after a `ContextOverflowError` or because it was asked to, it streams the
+  summary as ordinary `message.part.delta` events for that same session.
+  The serve-http runtime forwarded every one as an `EventDelta`, so the
+  summary was spliced into the reply between the text before the overflow
+  and the text after it.
+  - The runtime now records the compaction message from its
+    `message.updated` (`mode`/`agent` `"compaction"`, `summary: true`). It
+    drops the deltas whose `messageID` belongs to that message, including
+    the summary's reasoning part.
+  - Those events still appear in the raw event stream (session log,
+    `Fanout`).
+  - A user message's object-valued `summary` (`{"diffs": [...]}`) does not
+    mark anything. Deltas with no `messageID` pass through.
+  - The event shapes come from a live capture of OpenCode 1.18.33
+    compacting a session.
+
 ## v0.20.4 — 2026-10-01
 
 A coherent dependency refresh, and the fix that makes go-providers v0.41.0
