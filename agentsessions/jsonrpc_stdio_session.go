@@ -194,8 +194,12 @@ type jsonRpcStdioSession struct {
 	// starts a new reader). A Call needs a reader to receive its response.
 	readerFault  readerFault
 	readerExited atomic.Bool
-	startedPID   atomic.Int32
-	lastPID      atomic.Int32
+	// rpcTurn is the open turn's handle, as the adapter's
+	// provider.RPCTurnInterrupter reads it from the turn notifications;
+	// nil when no turn is open.
+	rpcTurn    atomic.Pointer[json.RawMessage]
+	startedPID atomic.Int32
+	lastPID    atomic.Int32
 	// spawnedAt is the most-recent successful cmd.Start time as unix
 	// nanoseconds. Set inside spawnAttempt after cmd.Start; read by the
 	// waiter paths to compute elapsed-since-spawn for the abnormal-wait
@@ -426,6 +430,7 @@ func (s *jsonRpcStdioSession) runReaderLoop(stdout io.Reader) {
 			s.respondToServerRequest(frame)
 		case frame.Method != "":
 			// Notification — no response expected.
+			s.followTurn(frame.Method, frame.Params)
 			if s.opts.JsonRpcNotificationHook != nil {
 				s.opts.JsonRpcNotificationHook(frame.Method, frame.Params)
 			}
