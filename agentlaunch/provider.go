@@ -51,4 +51,23 @@ type ProviderSpec struct {
 	// provider keeps its own default. PlanFromLaunch sets it from
 	// RuntimeBinding.Permission. Optional.
 	Permission permission.Mode `yaml:"permission,omitempty" json:"permission,omitempty"`
+
+	// MCPExclusive keeps the launch to the MCP servers the launch itself
+	// plants (Injection.MCPServers, the boot profile's), so the user's own
+	// servers, from the config the runtime reads outside the launch, are not
+	// loaded next to them. Without it a runtime may load both, and a host that
+	// allow-lists the planted servers has not limited the user-level ones.
+	//
+	// go-providers owns the mechanism per runtime and mode
+	// (registry.MCPExclusivity): Claude's --strict-mcp-config, which the
+	// projection adds to the argv; Codex's planted CODEX_HOME, which the launch
+	// always sets. Where none was measured (OpenCode, Antigravity today) the
+	// launch is refused, not run non-exclusive: Compile returns
+	// ErrMCPExclusiveUnsupported, and so does the preparer should a plan reach
+	// it uncompiled or through an adapter that cannot honor the request. The
+	// user's servers are left out on purpose: a host that wants one passes it
+	// as a planted server. It does not narrow which tools of the planted
+	// servers may run; that stays the host's allow-list. Default false: the
+	// launch is exactly what it was. Optional.
+	MCPExclusive bool `yaml:"mcp_exclusive,omitempty" json:"mcp_exclusive,omitempty"`
 }

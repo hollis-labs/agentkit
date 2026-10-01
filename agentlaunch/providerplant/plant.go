@@ -153,6 +153,11 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 	for name, value := range posture.Env {
 		env[name] = agentlaunch.EnvVar{Value: value, Source: "posture", Precedence: 20}
 	}
+	if plan.Provider.MCPExclusive {
+		if err := requireExclusiveEnv(projection, binding.Env, env); err != nil {
+			return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
+		}
+	}
 	execution := &agentlaunch.PreparedExecution{
 		InputKind:       agentlaunch.PrepareInputArtifacts,
 		Artifacts:       artifacts,
@@ -191,9 +196,17 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 	plan := prepared.Compiled.Plan
 	bootDir := prepared.PlantedBootDir
 	if pp, ok := adapter.(provider.ProjectionProvider); ok {
-		proj, err := pp.ProviderProjection(plantCtx, provider.ProjectionOptions{Version: plan.Provider.Version})
+		proj, err := pp.ProviderProjection(plantCtx, provider.ProjectionOptions{Version: plan.Provider.Version, MCPExclusive: plan.Provider.MCPExclusive})
 		if err != nil {
 			return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: provider projection: %w", err)
+		}
+		// The projection is judged, not the request: an adapter that is not
+		// go-providers' own may ignore the option, and a pinned or custom one
+		// is exactly how a launch would silently run non-exclusive.
+		if plan.Provider.MCPExclusive {
+			if err := provider.CheckMCPExclusive(proj); err != nil {
+				return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: provider projection: %w", err)
+			}
 		}
 		launch := &agentlaunch.TurnTemplate{
 			Convention: proj.Launch,
@@ -207,6 +220,12 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 		translated := agentlaunch.ProviderProjectionFromProvider(proj)
 		return translated.Artifacts, translated, binding, launch, nil
 	}
+	// A legacy BootDirSpec provider has no projection, so nothing in its launch
+	// is something go-providers declared exclusive.
+	if plan.Provider.MCPExclusive {
+		return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: %w: %s is planted from a BootDirSpec, which has no projection to keep a launch to its own MCP servers",
+			agentlaunch.ErrMCPExclusiveUnsupported, plan.Provider.ID)
+	}
 	artifacts, projection, binding, err := legacyProjection(prepared, adapter.BootDirSpec(), plantCtx, projectDir)
 	return artifacts, projection, binding, nil, err
 }
@@ -214,6 +233,32 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 // launchExtraArgs are the launch's own flags: the posture's, then
 // Provider.Flags, then Injection.Args. A caller's flag after the posture's is
 // the one a CLI that takes the last value honours.
+// requireExclusiveEnv checks, for a launch asked to be kept to its own MCP
+// servers, what the projection alone cannot show: that the environment the
+// process starts with still carries what the launch set. A mode whose
+// exclusivity is its projected config root (Codex's CODEX_HOME, registry.
+// MCPExclusivityProjectedLayout) holds only while the process reads that root, and the
+// caller's environment and the permission posture are merged after the launch's
+// own. The launch's variable wins over a caller's, so a plan's Provider.Env
+// cannot move the root; this refuses the launch should anything that merges
+// later do so.
+func requireExclusiveEnv(projection agentlaunch.ProviderProjection, set []provider.EnvDelta, env map[string]agentlaunch.EnvVar) error {
+	d, ok := registry.Lookup(projection.Provider)
+	if !ok || d.MCPExclusivity(projection.Runtime) != registry.MCPExclusivityProjectedLayout {
+		return nil
+	}
+	for _, delta := range set {
+		if delta.Name == "" || delta.Operation != provider.EnvSet || delta.Precedence == provider.EnvCallerWins {
+			continue
+		}
+		if got := env[delta.Name]; got.Value != delta.Value {
+			return fmt.Errorf("%w: %s/%s is kept to its own MCP servers by %s=%q, but the launch environment has %q (from %s)",
+				agentlaunch.ErrMCPExclusiveUnsupported, projection.Provider, projection.Runtime, delta.Name, delta.Value, got.Value, got.Source)
+		}
+	}
+	return nil
+}
+
 func launchExtraArgs(plan *agentlaunch.LaunchPlan, posture registry.PostureLaunch) []string {
 	extras := make([]string, 0, len(posture.Args)+len(plan.Provider.Flags)+len(plan.Injection.Args))
 	extras = append(extras, posture.Args...)
