@@ -4,6 +4,39 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.14.0 — 2026-10-01
+
+Event vocabulary on the subprocess path (CW-20260930-0137; CW-20260930-0222
+L2/L3 decided). Requires go-providers v0.35.0 and go-llm-types v0.5.1, bumped
+together.
+
+### Added
+
+- **`events.AuthFailed`.** When the adapter's `AuthFailureClassifier`
+  recognises a sign-in failure, the turn now also emits a typed
+  `events.AuthFailed` to `TypedEventCallback` and an `[auth_failed]` marker on
+  the byte Fanout. Previously the turn's error was the only signal. The
+  error still wraps `provider.ErrProviderNotAuthenticated`.
+
+### Changed
+
+- **Typed events are on by default on the subprocess path.** An adapter that
+  implements `provider.EventParser` is always tapped, whether or not
+  `TypedEventCallback` is set. Without a callback, typed-only events still
+  reach the byte Fanout; for example the `[permission_denied:...]` marker,
+  which used to appear only when a callback was set.
+- Requires go-providers v0.35.0 (block ids, normalised stop reasons,
+  per-event `CostUSD`, `events.AuthFailed`) and go-llm-types v0.5.1 (was
+  v0.32.0 / v0.3.0).
+
+### Decided, not built
+
+- No agentkit-level per-turn usage total (CW-20260930-0222 L2). Done cheaply
+  it would cover only the subprocess path. go-agent-wrapper already carries
+  each turn's accumulated usage and cost on its one terminal event, and
+  consumers moving onto the wrapper (D-71) get it there.
+- Usage stays off the byte Fanout (L3): the typed path carries it.
+
 ## v0.12.2 — 2026-10-01
 
 Patch (CW-20260930-0134, deferred from the agentkit#7 review).
