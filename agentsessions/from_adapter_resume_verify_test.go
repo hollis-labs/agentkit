@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
 	"github.com/hollis-labs/go-providers/provider/events"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
 // agyLikeAdapter mimics agy: a resume of an unknown id warns on stderr,
@@ -148,34 +150,91 @@ func startAgyLike(t *testing.T, a *agyLikeAdapter, preset string) (Session, *byt
 	return sess, &fanout, &lost, &typed, dir
 }
 
+// startAgy runs the real provider.AntigravityAdapter on providertest runs of
+// go-providers' live agy captures.
+func startAgy(t *testing.T, preset string, runs ...providertest.Run) (Session, *syncBuffer, *[]lostCall, *[]events.Event) {
+	t.Helper()
+	fake := providertest.New(t, runtimes.Antigravity, runs...)
+	adapter := provider.NewAntigravityAdapter()
+	adapter.Binary = fake.Path
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{ID: "agy", Kind: "cli", Adapter: adapter, Caps: Capabilities{ProviderSessionID: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fanout syncBuffer
+	var lost []lostCall
+	var typed []events.Event
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir:            t.TempDir(),
+		SessionIDPreset:    preset,
+		Fanout:             &fanout,
+		TypedEventCallback: func(ev events.Event) { typed = append(typed, ev) },
+		OnProviderSessionLost: func(r, act, reason string) {
+			lost = append(lost, lostCall{r, act, reason})
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+	return sess, &fanout, &lost, &typed
+}
+
+// agySessionID is the session id an agy capture reports.
+func agySessionID(t *testing.T, name string) string {
+	t.Helper()
+	for _, line := range providertest.FixtureLines(t, name) {
+		evs, _ := provider.NewAntigravityAdapter().ParseLine(line)
+		for _, ev := range evs {
+			if ev.Type == llmtypes.EventSessionID && ev.SessionID != "" {
+				return ev.SessionID
+			}
+		}
+	}
+	t.Fatalf("%s reports no session id", name)
+	return ""
+}
+
 // A resume that the provider answers with a different id reports the lost
 // session once, alongside a turn that still succeeds.
 func TestAdapterRuntime_ResumeReplacedSessionIsReported(t *testing.T) {
-	sess, fanout, lost, typed, _ := startAgyLike(t, &agyLikeAdapter{keepsID: true}, "ses_gone")
+	// agy 1.2.7 resuming an id it does not have: it warns on stderr, exits
+	// 0 and runs the turn in a new conversation (antigravity/
+	// print_resume_unknown_id). The next turn resumes that new conversation,
+	// which keeps its id: the same capture's stdout, without the warning.
+	var resumed []providertest.Step
+	for _, line := range providertest.FixtureLines(t, "antigravity/print_resume_unknown_id.jsonl") {
+		resumed = append(resumed, providertest.Stdout(string(line)))
+	}
+	sess, fanout, lost, typed := startAgy(t, "ses_gone",
+		providertest.Replay("antigravity/print_resume_unknown_id"),
+		providertest.Script(resumed...),
+	)
+	actual := agySessionID(t, "antigravity/print_resume_unknown_id.jsonl")
 
 	if err := sess.SendInput(context.Background(), []byte("turn N")); err != nil {
 		t.Fatalf("turn N: %v (the turn itself succeeded)", err)
 	}
-	want := []lostCall{{"ses_gone", "ses_new", sessionLostReason}}
-	if len(*lost) != 1 || (*lost)[0] != want[0] {
-		t.Fatalf("OnProviderSessionLost calls = %+v; want %+v", *lost, want)
+	want := lostCall{"ses_gone", actual, sessionLostReason}
+	if len(*lost) != 1 || (*lost)[0] != want {
+		t.Fatalf("OnProviderSessionLost calls = %+v; want [%+v]", *lost, want)
 	}
 	var sawLost bool
 	for _, ev := range *typed {
 		if sl, ok := ev.(events.SessionLost); ok {
-			sawLost = sl == events.SessionLost{RequestedID: "ses_gone", ActualID: "ses_new", Reason: sessionLostReason}
+			sawLost = sl == events.SessionLost{RequestedID: "ses_gone", ActualID: actual, Reason: sessionLostReason}
 		}
 	}
 	if !sawLost {
 		t.Errorf("typed events = %#v; want an events.SessionLost", *typed)
 	}
 	out := fanout.String()
-	marker := "[session_lost] requested=ses_gone actual=ses_new: " + sessionLostReason
+	marker := "[session_lost] requested=ses_gone actual=" + actual + ": " + sessionLostReason
 	if !strings.Contains(out, marker) || strings.Index(out, marker) > strings.Index(out, "[turn_done]") {
 		t.Errorf("fanout = %q; want the session_lost marker before [turn_done]", out)
 	}
-	if got := sess.(SessionIDer).ProviderSessionID(); got != "ses_new" {
-		t.Errorf("stored id = %q; want ses_new", got)
+	if got := sess.(SessionIDer).ProviderSessionID(); got != actual {
+		t.Errorf("stored id = %q; want %s", got, actual)
 	}
 
 	// The next turn resumes the new session and reports nothing.
@@ -187,8 +246,10 @@ func TestAdapterRuntime_ResumeReplacedSessionIsReported(t *testing.T) {
 	}
 }
 
+// agy resuming a conversation it has keeps its id (antigravity/
+// print_turn2_resume resumes print_turn1's).
 func TestAdapterRuntime_ResumeKeptSessionReportsNothing(t *testing.T) {
-	sess, fanout, lost, _, _ := startAgyLike(t, &agyLikeAdapter{keepsID: true}, "live")
+	sess, fanout, lost, _ := startAgy(t, agySessionID(t, "antigravity/print_turn1.jsonl"), providertest.Replay("antigravity/print_turn2_resume"))
 	if err := sess.SendInput(context.Background(), []byte("x")); err != nil {
 		t.Fatal(err)
 	}
@@ -271,11 +332,11 @@ func TestAdapterRuntime_TypedTapIsOnWithoutACallback(t *testing.T) {
 	}
 }
 
+// agy's own denial of a command it was not allowed to run (antigravity/
+// print_tool_denied) reaches the typed callback and the Fanout before the
+// turn ends.
 func TestAdapterRuntime_TypedTapSurfacesPermissionDenied(t *testing.T) {
-	sess, fanout, _, typed, dir := startAgyLike(t, &agyLikeAdapter{keepsID: true}, "")
-	if err := os.WriteFile(filepath.Join(dir, "deny"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	sess, fanout, _, typed := startAgy(t, "", providertest.Replay("antigravity/print_tool_denied"))
 	if err := sess.SendInput(context.Background(), []byte("x")); err != nil {
 		t.Fatal(err)
 	}
@@ -285,12 +346,13 @@ func TestAdapterRuntime_TypedTapSurfacesPermissionDenied(t *testing.T) {
 			denied = append(denied, d)
 		}
 	}
-	if len(denied) != 1 || denied[0].Action != "command" {
-		t.Errorf("typed = %#v", *typed)
+	if len(denied) == 0 {
+		t.Fatalf("typed = %#v; want agy's permission denial", *typed)
 	}
 	out := fanout.String()
-	if !strings.Contains(out, "[permission_denied:command] RunCommand") || strings.Index(out, "[permission_denied") > strings.Index(out, "[turn_done]") {
-		t.Errorf("fanout = %q", out)
+	marker := "[permission_denied:" + denied[0].Action + "]"
+	if !strings.Contains(out, marker) || strings.Index(out, marker) > strings.Index(out, "[turn_done]") {
+		t.Errorf("fanout = %q; want %s before [turn_done]", out, marker)
 	}
 }
 
