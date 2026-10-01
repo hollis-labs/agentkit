@@ -33,22 +33,22 @@ func codexResumeTailOK(tail []string) bool {
 }
 
 // An auto-planted codex exec session resumes its thread on turn 2 with
-// `exec … --cd <project> resume <id> -- <prompt>`: --cd in front of the
-// subcommand, where codex takes it, and nothing after `resume <id>` that
-// codex refuses there. Before agentkit v0.20.4 the planted --cd was spliced
-// in through ExtraArgs, after `resume <id>`, and turn 2 failed against the
-// real CLI (CW-20261001-0194). Turn 1's argv is unchanged.
+// `exec … --cd <project> resume <id> -- <prompt>`: --cd and the session's
+// ExtraArgs in front of the subcommand, where codex takes exec options, and
+// nothing after `resume <id>` that codex refuses there. Before agentkit
+// v0.20.4 the planted --cd was spliced in after `resume <id>`
+// (CW-20261001-0194); until CW-20261001-0197 so were StartOptions.ExtraArgs,
+// so an exec-only flag such as -s broke turn 2. Turn 1's argv without extras
+// is unchanged.
 func TestAutoPlantedCodexExecResumesWithCdBeforeResume(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		extra []string
 	}{
 		{"no extra args", nil},
-		// StartOptions.ExtraArgs are still spliced before "--", which on a
-		// resume turn is after `resume <id>`: they must be resume-safe.
-		// This pins that ordering; CW-20261001-0197 moves them to the
-		// convention's extra slot, in front of `resume`.
-		{"resume-safe extra args", []string{"-c", `sandbox_mode="read-only"`}},
+		{"config override", []string{"-c", `sandbox_mode="read-only"`}},
+		// Exec-only: codex refuses -s after `resume <id>`.
+		{"exec-only flag", []string{"-s", "read-only"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			fake := providertest.New(t, runtimes.Codex,
@@ -86,11 +86,9 @@ func TestAutoPlantedCodexExecResumesWithCdBeforeResume(t *testing.T) {
 			}
 
 			first := calls[0].Args
-			if c.extra == nil {
-				want := []string{"exec", "--json", "--skip-git-repo-check", "--cd", project, "--", "say hi"}
-				if !slices.Equal(first, want) {
-					t.Errorf("turn 1 argv = %q, want %q (unchanged)", first, want)
-				}
+			want := slices.Concat([]string{"exec"}, c.extra, []string{"--json", "--skip-git-repo-check", "--cd", project, "--", "say hi"})
+			if !slices.Equal(first, want) {
+				t.Errorf("turn 1 argv = %q, want %q", first, want)
 			}
 			if slices.Contains(first, "resume") {
 				t.Errorf("turn 1 resumed: %q", first)
@@ -109,6 +107,9 @@ func TestAutoPlantedCodexExecResumesWithCdBeforeResume(t *testing.T) {
 			}
 			if tail := second[r+2 : dd]; !codexResumeTailOK(tail) {
 				t.Errorf("turn 2 argv = %q: codex refuses %q after `resume <id>`", second, tail)
+			}
+			if c.extra != nil && !slices.Equal(second[1:1+len(c.extra)], c.extra) {
+				t.Errorf("turn 2 argv = %q, want the session's extras %q at the convention slot, in front of resume", second, c.extra)
 			}
 			if !slices.Equal(second[dd+1:], []string{"say bye"}) {
 				t.Errorf("turn 2 after \"--\" = %q, want the prompt", second[dd+1:])
