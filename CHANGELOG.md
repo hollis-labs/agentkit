@@ -4,6 +4,26 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.6 — 2026-10-01
+
+### Fixed
+
+- **OpenCode serve: reasoning reaches the turn as thought, not reply text**
+  (CW-20261001-0209). OpenCode streams a reasoning part's text as the same
+  `message.part.delta` event as the reply's. Only the earlier
+  `message.part.updated`, with `part.type: "reasoning"`, tells them apart.
+  The serve-http runtime forwarded both as unclassified `EventDelta`s, so a
+  reasoning model's thinking was spliced into the reply.
+  - The runtime now records reasoning part ids. It emits their deltas with
+    `Phase: llmtypes.PhaseThinking` (`"thought"`) and `BlockID` set to the
+    part id, the same classification go-providers' `opencode run` parser
+    gives reasoning.
+  - Text parts, deltas with no part announcement, and deltas with no
+    `partID` are unchanged.
+  - The compaction summary's reasoning is still held back entirely
+    (v0.20.5).
+  - The event shapes come from the same live capture of OpenCode 1.18.33.
+
 ## v0.20.5 — 2026-10-01
 
 ### Fixed
