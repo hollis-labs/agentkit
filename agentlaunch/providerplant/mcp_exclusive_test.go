@@ -260,3 +260,24 @@ func TestRequireExclusiveEnv(t *testing.T) {
 		t.Errorf("a flag mode is judged on its argv: %v", err)
 	}
 }
+
+// The environment guard's own cases are above; this holds that the preparer
+// runs it, and only when exclusivity was asked for. No input today makes it
+// fire (the launch's variable has provider precedence and only OpenCode's
+// posture sets environment), so without this a dropped call would pass every
+// other test.
+func TestPrepareExecution_MCPExclusiveRunsTheEnvironmentGuard(t *testing.T) {
+	sentinel := errors.New("the guard ran")
+	saved := checkExclusiveEnv
+	checkExclusiveEnv = func(agentlaunch.ProviderProjection, []provider.EnvDelta, map[string]agentlaunch.EnvVar) error {
+		return sentinel
+	}
+	t.Cleanup(func() { checkExclusiveEnv = saved })
+
+	if _, err := prepareMCP(t, "codex", runtimes.ModeSubprocessPerTurn, true, nil); !errors.Is(err, sentinel) {
+		t.Errorf("asked for exclusivity: err = %v, want the guard's error", err)
+	}
+	if _, err := prepareMCP(t, "codex", runtimes.ModeSubprocessPerTurn, false, nil); err != nil {
+		t.Errorf("not asked: the guard must not run, got %v", err)
+	}
+}

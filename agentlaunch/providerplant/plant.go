@@ -154,7 +154,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 		env[name] = agentlaunch.EnvVar{Value: value, Source: "posture", Precedence: 20}
 	}
 	if plan.Provider.MCPExclusive {
-		if err := requireExclusiveEnv(projection, binding.Env, env); err != nil {
+		if err := checkExclusiveEnv(projection, binding.Env, env); err != nil {
 			return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
 		}
 	}
@@ -242,6 +242,11 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 // own. The launch's variable wins over a caller's, so a plan's Provider.Env
 // cannot move the root; this refuses the launch should anything that merges
 // later do so.
+// checkExclusiveEnv is requireExclusiveEnv behind a variable, so a test can hold
+// that the preparer runs it exactly when exclusivity was asked for. Nothing else
+// assigns it.
+var checkExclusiveEnv = requireExclusiveEnv
+
 func requireExclusiveEnv(projection agentlaunch.ProviderProjection, set []provider.EnvDelta, env map[string]agentlaunch.EnvVar) error {
 	d, ok := registry.Lookup(projection.Provider)
 	if !ok || d.MCPExclusivity(projection.Runtime) != registry.MCPExclusivityProjectedLayout {

@@ -67,7 +67,16 @@ Takes go-providers v0.43.0. **Partly done; see "Not done yet".**
   naming provider and mode.
 - A plan's own `CODEX_HOME` does not move the root; a custom adapter that ignores
   the option is refused; a `BootDirSpec`-only provider is refused; the environment
-  guard refuses a root that did not survive the merge.
+  guard refuses a root that did not survive the merge, and the preparer runs it
+  exactly when exclusivity was asked for.
+- `Compile` refuses every runtime and mode go-providers declares no mechanism for,
+  naming provider and mode, and compiles the rest; a plan that does not ask
+  compiles as before.
+- Mutations that fail a test: the option not passed to the projection, the
+  projection not judged, a `BootDirSpec`-only provider not refused, the environment
+  guard dropped or run when not asked, `Compile`'s check removed, reverted to
+  refusing only an unmeasured mode, or no longer naming the mode, and the field
+  losing `omitempty`.
 
 ## v0.21.0 — 2026-10-01
 
