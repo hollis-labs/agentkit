@@ -2,88 +2,29 @@ package agentsessions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/providertest"
 )
 
-// sessionLostAdapter mimics `opencode run`: a resume turn passes
-// "--session <id>" and a dead id fails with "Session not found" on stderr,
-// no stdout and exit 1. The script hands out a fresh id on a turn that
-// passes none.
-type sessionLostAdapter struct {
-	script string
-	argv   [][]string
-}
+// The session-lost tests run the real Claude print adapter against
+// go-providers' live captures (claude 2.1.286): a resume of an id claude no
+// longer has fails with "No conversation found with session ID: <id>" on
+// stderr and exit 1, which ClaudeAdapter.IsSessionLost recognises.
 
-func (a *sessionLostAdapter) Name() string { return "session-lost-test" }
+// lostClaudeID is the id the claude/print_resume_unknown_id capture resumed.
+const lostClaudeID = "00000000-0000-4000-8000-0000000000ff"
 
-func (a *sessionLostAdapter) BuildArgs(_, _, sessionID string) []string {
-	var args []string
-	if sessionID != "" {
-		args = []string{"--session", sessionID}
-	}
-	a.argv = append(a.argv, args)
-	return args
-}
-
-func (a *sessionLostAdapter) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
-	s := strings.TrimRight(string(line), "\r\n")
-	if id, ok := strings.CutPrefix(s, "session:"); ok {
-		return []llmtypes.StreamEvent{{Type: llmtypes.EventSessionID, SessionID: id}}, nil
-	}
-	if s == "done" {
-		return []llmtypes.StreamEvent{{Type: llmtypes.EventDone}}, nil
-	}
-	return nil, nil
-}
-
-func (a *sessionLostAdapter) Detect() (string, bool) { return a.script, a.script != "" }
-
-func (a *sessionLostAdapter) IsSessionLost(stderrTail []byte) bool {
-	return strings.Contains(string(stderrTail), "Session not found")
-}
-
-var _ provider.SessionLostClassifier = (*sessionLostAdapter)(nil)
-
-func writeSessionLostScript(t *testing.T, dir string) string {
+func startClaudePrint(t *testing.T, fake *providertest.Fake, opts StartOptions) Session {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
-	path := filepath.Join(dir, "fake-opencode.sh")
-	body := `#!/bin/sh
-if [ "$1" = "--session" ]; then
-  if [ "$2" = "ses_dead" ]; then
-    printf 'Error: Session not found\n' 1>&2
-    exit 1
-  fi
-  printf 'session:%s\n' "$2"
-  printf 'done\n'
-  exit 0
-fi
-printf 'session:ses_fresh\n'
-printf 'done\n'
-`
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
-	return path
-}
-
-// TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError: a stale id
-// fails turn N with an error matching provider.ErrProviderSessionLost and
-// clears the stored id; turn N+1 runs without --session, and OnSessionID
-// reports the new id. Nothing is retried on the caller's behalf.
-func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
-	dir := t.TempDir()
-	adapter := &sessionLostAdapter{script: writeSessionLostScript(t, dir)}
+	adapter := provider.NewClaudeAdapter()
+	adapter.Binary = fake.Path
 	rt, err := NewFromAdapter(AdapterRuntimeConfig{
 		ID:      "session-lost",
 		Kind:    "cli",
@@ -93,25 +34,52 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFromAdapter: %v", err)
 	}
+	opts.Workdir = t.TempDir()
+	sess, err := rt.Start(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+	return sess
+}
 
+// captureSessionID is the session id a per-turn capture reports.
+func captureSessionID(t *testing.T, name string) string {
+	t.Helper()
+	for _, line := range providertest.FixtureLines(t, name) {
+		var ev struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(line, &ev) == nil && ev.SessionID != "" {
+			return ev.SessionID
+		}
+	}
+	t.Fatalf("%s reports no session id", name)
+	return ""
+}
+
+// TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError: a stale id
+// fails turn N with an error matching provider.ErrProviderSessionLost and
+// clears the stored id; turn N+1 runs without --resume, and OnSessionID
+// reports the new id. Nothing is retried on the caller's behalf.
+func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
+	fake := providertest.New(t, runtimes.Claude,
+		providertest.Replay("claude/print_resume_unknown_id"),
+		providertest.Replay("claude/print_turn1"),
+	)
 	var stderrSeen strings.Builder
 	var ids []string
 	eventCh := make(chan llmtypes.StreamEvent, 16)
-	sess, err := rt.Start(context.Background(), StartOptions{
-		Workdir:         dir,
-		SessionIDPreset: "ses_dead",
+	sess := startClaudePrint(t, fake, StartOptions{
+		SessionIDPreset: lostClaudeID,
 		Stderr:          &stderrSeen,
 		EventFanout:     eventCh,
 		OnSessionID:     func(id string) { ids = append(ids, id) },
 	})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer func() { _ = sess.Stop(context.Background()) }()
 	ider := sess.(SessionIDer)
 
 	// Turn N: the stale id.
-	err = sess.SendInput(context.Background(), []byte("turn N"))
+	err := sess.SendInput(context.Background(), []byte("turn N"))
 	if !errors.Is(err, provider.ErrProviderSessionLost) {
 		t.Fatalf("turn N err = %v; want ErrProviderSessionLost", err)
 	}
@@ -119,62 +87,61 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 	if !errors.As(err, &lost) || lost.RequestedID == "" || lost.Err == nil {
 		t.Fatalf("turn N err = %#v; want *SessionLostError carrying RequestedID and Err", err)
 	}
-	if !strings.Contains(err.Error(), "ses_dead") {
+	if !strings.Contains(err.Error(), lostClaudeID) {
 		t.Errorf("turn N err %q does not name the lost id", err)
 	}
 	if got := ider.ProviderSessionID(); got != "" {
 		t.Errorf("stored id after a lost session = %q; want it cleared", got)
 	}
-	if !strings.Contains(stderrSeen.String(), "Session not found") {
+	if !strings.Contains(stderrSeen.String(), "No conversation found") {
 		t.Errorf("caller's Stderr did not receive the turn's stderr: %q", stderrSeen.String())
 	}
-	evs := drainEvents(eventCh)
-	if len(evs) != 1 || evs[0].Type != llmtypes.EventError || !strings.Contains(evs[0].Error, provider.ErrProviderSessionLost.Error()) {
-		t.Errorf("turn N events = %#v; want one EventError naming the lost session", evs)
+	// Claude ends the turn with its own error result, so turn N has one
+	// error event, Claude's. It does not name the lost session yet; that is
+	// CW-20261001-0184.
+	var errorEvents int
+	for _, ev := range drainEvents(eventCh) {
+		if ev.Type == llmtypes.EventError {
+			errorEvents++
+		}
+	}
+	if errorEvents != 1 {
+		t.Errorf("turn N: %d error events; want 1", errorEvents)
 	}
 
-	// Turn N+1: no --session, and the fresh id is reported.
+	// Turn N+1: no --resume, and the fresh id is reported.
 	if err := sess.SendInput(context.Background(), []byte("turn N+1")); err != nil {
 		t.Fatalf("turn N+1: %v", err)
 	}
-	if len(adapter.argv) != 2 || adapter.argv[0][1] != "ses_dead" || len(adapter.argv[1]) != 0 {
-		t.Errorf("argv per turn = %q; want --session ses_dead, then no --session", adapter.argv)
+	calls := fake.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("claude ran %d times; want 2", len(calls))
 	}
-	if got := ider.ProviderSessionID(); got != "ses_fresh" {
-		t.Errorf("stored id after turn N+1 = %q; want ses_fresh", got)
+	if got, _ := calls[0].ArgAfter("--resume"); got != lostClaudeID {
+		t.Errorf("turn N --resume = %q; want %s", got, lostClaudeID)
 	}
-	if len(ids) != 1 || ids[0] != "ses_fresh" {
-		t.Errorf("OnSessionID calls = %q; want [ses_fresh]", ids)
+	if calls[1].HasArg("--resume") {
+		t.Errorf("turn N+1 resumed: %q", calls[1].Args)
+	}
+	fresh := captureSessionID(t, "claude/print_turn1.jsonl")
+	if got := ider.ProviderSessionID(); got != fresh {
+		t.Errorf("stored id after turn N+1 = %q; want %s", got, fresh)
+	}
+	if len(ids) != 1 || ids[0] != fresh {
+		t.Errorf("OnSessionID calls = %q; want [%s]", ids, fresh)
 	}
 }
 
 // TestAdapterRuntime_SessionLost_OtherFailuresKeepID: a resume turn that
-// fails for any other reason keeps the id and returns the plain error.
+// fails for any other reason keeps the id and returns the plain error. The
+// failure is claude's own stderr line for a model it cannot use
+// (claude/print_error_unknown_model), with exit 1.
 func TestAdapterRuntime_SessionLost_OtherFailuresKeepID(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test script needs sh; not running on Windows")
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fail.sh")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf 'Error: rate limited\\n' 1>&2\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rt, err := NewFromAdapter(AdapterRuntimeConfig{
-		ID:      "session-kept",
-		Kind:    "cli",
-		Adapter: &sessionLostAdapter{script: path},
-		Caps:    Capabilities{ProviderSessionID: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sess, err := rt.Start(context.Background(), StartOptions{Workdir: dir, SessionIDPreset: "ses_live"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = sess.Stop(context.Background()) }()
+	stderr := strings.TrimSpace(string(providertest.ReadFixture(t, "claude/print_error_unknown_model.stderr")))
+	fake := providertest.New(t, runtimes.Claude, providertest.Script(providertest.Stderr(stderr), providertest.Exit(1)))
+	sess := startClaudePrint(t, fake, StartOptions{SessionIDPreset: "ses_live"})
 
-	err = sess.SendInput(context.Background(), []byte("x"))
+	err := sess.SendInput(context.Background(), []byte("x"))
 	if err == nil || errors.Is(err, provider.ErrProviderSessionLost) {
 		t.Fatalf("err = %v; want a plain failure", err)
 	}
