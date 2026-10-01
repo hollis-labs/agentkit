@@ -428,8 +428,9 @@ func (s *ptySession) runReaderLoop(ptmx *os.File) {
 }
 
 // spawnWaiterLegacy is the v0.5.0 waiter: blocks on cmd.Wait, nil-clears
-// ptmx under the write lock, closes ptmx (which unblocks the reader),
-// closes logFile after copyDone, records terminal state, signals s.done.
+// ptmx under the write lock, drains then closes ptmx (which unblocks the
+// reader), closes logFile after copyDone, records terminal state, signals
+// s.done.
 // Used only on the non-supervised lifecycle.
 func (s *ptySession) spawnWaiterLegacy(ptmx *os.File, cmd *exec.Cmd) {
 	go func() {
@@ -449,8 +450,9 @@ func (s *ptySession) spawnWaiterLegacy(ptmx *os.File, cmd *exec.Cmd) {
 		s.ptmx = nil
 		s.ptmxLock.Unlock()
 
-		_ = ptmx.Close()
-		<-s.copyDone
+		// Read what the child wrote before exiting, then close ptmx
+		// (bounded, see drainChildOutput). Closing first discarded it.
+		drainChildOutput(ptmx, s.copyDone)
 		_ = s.logFile.Close()
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
@@ -674,12 +676,12 @@ func (s *ptySession) waitOnceSupervised(ctx context.Context, cmd *exec.Cmd, ptmx
 	logAbnormalWait("pty", s.runtime.cfg.ID, pid, elapsed, waitErr)
 
 	// Nil-clear ptmx so in-flight SendInput / Resize sees ErrNoInputChannel
-	// before the close runs. Close unblocks the reader's scanner.
+	// before the close runs. The drain lets the reader take what the child
+	// wrote before exiting, then the close unblocks its scanner.
 	s.ptmxLock.Lock()
 	s.ptmx = nil
 	s.ptmxLock.Unlock()
-	_ = ptmx.Close()
-	<-readerDone
+	drainChildOutput(ptmx, readerDone)
 
 	_ = attempt // reserved for future per-attempt telemetry hooks
 	return buildExitError(cmd.ProcessState, waitErr, cause.getCause())

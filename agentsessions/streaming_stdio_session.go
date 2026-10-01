@@ -394,15 +394,25 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 	}
 }
 
-// drainStreamingStdout preserves buffered output after child exit, while
-// bounding a descendant that inherited stdout and keeps the pipe open. An
-// ordinary child closes its write end on exit, so draining finishes at EOF
-// without waiting for the timeout.
-func drainStreamingStdout(stdout io.ReadCloser, readerDone <-chan struct{}) {
-	timer := time.AfterFunc(time.Second, func() { _ = stdout.Close() })
+// childOutputDrainTimeout bounds how long a waiter keeps reading a child's
+// output after the child has exited.
+const childOutputDrainTimeout = time.Second
+
+// drainChildOutput preserves buffered output after child exit, while
+// bounding a descendant that inherited the output and keeps it open. It
+// waits for the reader to reach EOF, then closes out. An ordinary child
+// closes its end on exit, so draining finishes at EOF without waiting for
+// the timeout; past the timeout out is closed, which unblocks the reader.
+//
+// Every long-lived runtime reads its child's output from a file it owns (an
+// os.Pipe read end, or the PTY master) rather than from exec.Cmd's
+// StdoutPipe, because Cmd.Wait closes StdoutPipe as soon as the child exits,
+// racing the reader and discarding the child's final lines.
+func drainChildOutput(out io.Closer, readerDone <-chan struct{}) {
+	timer := time.AfterFunc(childOutputDrainTimeout, func() { _ = out.Close() })
 	<-readerDone
 	timer.Stop()
-	_ = stdout.Close()
+	_ = out.Close()
 }
 
 // spawnWaiterLegacy waits for the child, drains stdout, records terminal
@@ -427,7 +437,7 @@ func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteC
 		s.ioLock.Unlock()
 
 		_ = stdin.Close()
-		drainStreamingStdout(stdout, s.copyDone)
+		drainChildOutput(stdout, s.copyDone)
 		_ = s.logFile.Close()
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
@@ -611,7 +621,7 @@ func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exe
 	s.stdout = nil
 	s.ioLock.Unlock()
 	_ = stdin.Close()
-	drainStreamingStdout(stdout, readerDone)
+	drainChildOutput(stdout, readerDone)
 
 	_ = attempt
 	return buildExitError(cmd.ProcessState, waitErr, cause.getCause())

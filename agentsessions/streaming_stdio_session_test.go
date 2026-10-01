@@ -42,7 +42,7 @@ func TestStreamingStdioSession_DrainBoundsInheritedPipe(t *testing.T) {
 	}()
 	finished := make(chan struct{})
 	go func() {
-		drainStreamingStdout(reader, readerDone)
+		drainChildOutput(reader, readerDone)
 		close(finished)
 	}()
 	select {
