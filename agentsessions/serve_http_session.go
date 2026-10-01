@@ -201,6 +201,14 @@ type serveHTTPSession struct {
 
 	turnMu       sync.Mutex
 	turnInFlight bool
+	// turnBusy is set when OpenCode reports the turn in flight busy.
+	// interruptedTurn marks a turn InterruptTurn aborted; once it ends,
+	// afterAbort holds until the next turn ends. OpenCode follows an
+	// abort with a late second session.idle as the aborted tool cleans up,
+	// so after an abort a turn ends only once it has been reported busy.
+	turnBusy        bool
+	interruptedTurn bool
+	afterAbort      bool
 
 	streamCancel context.CancelFunc
 }
@@ -486,6 +494,9 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 		Properties struct {
 			SessionID string `json:"sessionID"`
 			Delta     string `json:"delta"`
+			Status    struct {
+				Type string `json:"type"`
+			} `json:"status"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(data, &ev); err != nil {
@@ -499,6 +510,9 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 			Properties struct {
 				SessionID string `json:"sessionID"`
 				Delta     string `json:"delta"`
+				Status    struct {
+					Type string `json:"type"`
+				} `json:"status"`
 			} `json:"properties"`
 		}
 		if err := json.Unmarshal(payload, &wrapped); err == nil && wrapped.Type != "" {
@@ -524,12 +538,20 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 		if ev.Properties.Delta != "" {
 			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: ev.Properties.Delta})
 		}
+	case "session.status":
+		if ev.Properties.Status.Type == "busy" {
+			s.turnMu.Lock()
+			s.turnBusy = s.turnInFlight
+			s.turnMu.Unlock()
+		}
 	case "session.idle", "session.next.step.ended":
-		s.markTurnDone()
-		tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		if s.endTurn() {
+			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		}
 	case "session.error", "session.next.step.failed":
-		s.markTurnDone()
-		tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: string(data)})
+		if s.endTurn() {
+			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: string(data)})
+		}
 	}
 }
 
@@ -578,6 +600,23 @@ func (s *serveHTTPSession) finishOnProcessExit() {
 		}
 		close(s.done)
 	})
+}
+
+// endTurn ends the turn in flight and reports whether there was one to end.
+// An idle or error with no turn in flight ends nothing: OpenCode follows an
+// error with an idle, and an abort with a late second idle, and neither is a
+// turn of its own. After an abort, a turn ends only once OpenCode has
+// reported it busy, so that late idle cannot end the next turn.
+func (s *serveHTTPSession) endTurn() bool {
+	s.turnMu.Lock()
+	if !s.turnInFlight || (s.afterAbort && !s.turnBusy) {
+		s.turnMu.Unlock()
+		return false
+	}
+	s.afterAbort, s.interruptedTurn = s.interruptedTurn, false
+	s.turnMu.Unlock()
+	s.markTurnDone()
+	return true
 }
 
 func (s *serveHTTPSession) markTurnDone() {
@@ -667,6 +706,7 @@ func (s *serveHTTPSession) SendInput(ctx context.Context, data []byte) error {
 		return ErrTurnInFlight
 	}
 	s.turnInFlight = true
+	s.turnBusy = false
 	s.turnMu.Unlock()
 
 	body, err := json.Marshal(map[string]any{

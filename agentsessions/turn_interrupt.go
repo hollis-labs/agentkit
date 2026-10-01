@@ -3,7 +3,11 @@ package agentsessions
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 
@@ -109,4 +113,80 @@ func (s *streamingStdioSession) InterruptTurn(ctx context.Context) error {
 		s.interrupts.forget(id)
 		return ctx.Err()
 	}
+}
+
+// followTurn tracks the open turn through the adapter's
+// provider.RPCTurnInterrupter, for InterruptTurn.
+func (s *jsonRpcStdioSession) followTurn(method string, params json.RawMessage) {
+	ti, ok := s.adapter.(provider.RPCTurnInterrupter)
+	if !ok {
+		return
+	}
+	handle, started, ended := ti.TurnNotification(method, params)
+	switch {
+	case started:
+		s.rpcTurn.Store(&handle)
+	case ended:
+		if cur := s.rpcTurn.Load(); cur != nil && bytes.Equal(*cur, handle) {
+			s.rpcTurn.Store(nil)
+		}
+	}
+}
+
+// InterruptTurn interrupts the open turn with the adapter's interrupt
+// request (provider.RPCTurnInterrupter: Codex app-server's turn/interrupt)
+// and returns on its response. The turn then ends the runtime's usual way
+// (Codex: turn/completed, status "interrupted") and the next turn runs on the
+// same process. With no turn open it does nothing; a turn that ends while the
+// request is in flight is not an error.
+func (s *jsonRpcStdioSession) InterruptTurn(ctx context.Context) error {
+	ti, ok := s.adapter.(provider.RPCTurnInterrupter)
+	if !ok {
+		return ErrInterruptUnsupported
+	}
+	turn := s.rpcTurn.Load()
+	if turn == nil {
+		return nil
+	}
+	method, params := ti.InterruptCall(*turn)
+	_, err := s.Call(ctx, method, params)
+	if err != nil && s.rpcTurn.Load() != turn {
+		return nil
+	}
+	return err
+}
+
+// InterruptTurn aborts the session's turn (OpenCode serve's
+// POST /session/{id}/abort) and returns on the server's answer. The turn
+// ends with session.error (MessageAbortedError), which the session reports as
+// an error event, and the server and session stay up for the next SendInput.
+// With no turn in flight OpenCode answers true and nothing else happens.
+func (s *serveHTTPSession) InterruptTurn(ctx context.Context) error {
+	if !s.alive.Load() || s.sessionID == "" {
+		return ErrNoInputChannel
+	}
+	s.turnMu.Lock()
+	marked := s.turnInFlight
+	if marked {
+		s.interruptedTurn = true
+	}
+	s.turnMu.Unlock()
+	endpoint := s.withWorkdirQuery(s.baseURL + "/session/" + url.PathEscape(s.sessionID) + "/abort")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err == nil {
+		var resp *http.Response
+		if resp, err = s.httpClient.Do(req); err == nil {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			_ = resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				err = fmt.Errorf("agentsessions: serve-http abort: status %d: %s", resp.StatusCode, body)
+			}
+		}
+	}
+	if err != nil && marked {
+		s.turnMu.Lock()
+		s.interruptedTurn = false
+		s.turnMu.Unlock()
+	}
+	return err
 }
