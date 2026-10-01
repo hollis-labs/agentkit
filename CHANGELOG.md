@@ -4,6 +4,17 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.12.2 — 2026-10-01
+
+Patch (CW-20260930-0134, deferred from the agentkit#7 review).
+
+### Fixed
+
+- `turn.Frame` and `turn.SendTurn` frame the ACP modes (`acp-stdio`,
+  `acp-tcp`) as plain text, the input go-agent-wrapper's ACP client wraps in
+  `session/prompt`. Copilot and Pi resolve to `acp-stdio` by default
+  (`runtimebind`), so their turns returned `ErrUnsupportedRuntime` instead.
+
 ## v0.12.1 — 2026-10-01
 
 Patch: serve-http no longer corrupts multi-line SSE event data

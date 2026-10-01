@@ -284,3 +284,22 @@ func (r *recordingRPC) methods() []string {
 	}
 	return out
 }
+
+// Copilot and Pi resolve to ACP by default (runtimebind); their turns are
+// plain text for the ACP client to wrap in session/prompt. An API binding has
+// no mode and nothing to frame.
+func TestFrameACPAndAPI(t *testing.T) {
+	for _, mode := range []runtimes.Mode{runtimes.ModeACPStdio, runtimes.ModeACPTCP} {
+		got, err := Frame("say hi", Options{Runtime: mode})
+		if err != nil || string(got) != "say hi" {
+			t.Errorf("%s: Frame = %q, %v; want the plain text", mode, got, err)
+		}
+		s := &captureSender{}
+		if err := SendTurn(context.Background(), s, "say hi", Options{Runtime: mode}); err != nil || string(s.last) != "say hi" {
+			t.Errorf("%s: SendTurn = %v, sent %q", mode, err, s.last)
+		}
+	}
+	if _, err := Frame("say hi", Options{}); !errors.Is(err, ErrUnsupportedRuntime) {
+		t.Errorf("empty mode: err = %v, want ErrUnsupportedRuntime", err)
+	}
+}
