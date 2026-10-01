@@ -4,6 +4,45 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.19.0 — 2026-10-01
+
+Hosts can write-protect their control-plane state from the agents they
+launch (CW-20260930-0237). Requires go-sandbox v0.5.0.
+
+### Security
+
+- **`StartOptions.ProtectedPaths`** lists absolute paths the agent must
+  never write: a host's state dirs, database, config, catalog or
+  allow-lists. An agent running as the operator's uid could otherwise
+  rewrite them to grant itself authority.
+- **Composition.** It is folded into the one sandbox that wraps the child,
+  at the same point as `DenyGUILaunch` and just before it:
+  - onto an existing `SandboxPolicy`, via go-sandbox `WithProtected`, or
+    onto a `Profile` (`FS.Protect`). Both are copies; the caller's values
+    are not mutated.
+  - with no sandbox, or a disabled `SandboxPolicy`, as a minimal
+    host-filesystem profile (`protect-control-plane`) whose only effect is
+    the protection.
+- **Fail closed.** A backend that cannot write-protect, or a
+  provider-native runtime, refuses the launch with
+  `ErrProtectedPathsUnsupported` instead of running with the control plane
+  writable. A relative path is refused.
+- **Tested end to end.** An adapter turn whose CLI tries to rewrite an
+  allow-list in a registered dir, and to plant a file there, is refused
+  while its workdir write lands. Without the composition the same test
+  shows the allow-list rewritten.
+- **Boundary.** It is go-sandbox's: Protect stops direct writes in every
+  mode. Against writes delegated to another process (for example
+  `systemd-run --user` over the user bus), it holds only under a narrowed
+  or resolved policy that doesn't mount those sockets. The minimal
+  host-filesystem profile is not a boundary against delegation.
+- **Registration.** Register state directories, by their real path, that
+  exist before launch. go-sandbox refuses:
+  - a file, because its directory stays writable, so an atomic save or a
+    database sidecar would defeat it;
+  - a path through a symlink the agent could re-point;
+  - on Linux, a missing path the agent could create.
+
 ## v0.18.0 — 2026-10-01
 
 A cooperative turn interrupt for streaming-stdio Claude (CW-20261001-0103).
