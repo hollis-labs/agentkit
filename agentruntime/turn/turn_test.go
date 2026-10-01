@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	"github.com/hollis-labs/go-providers/provider"
 )
@@ -39,7 +39,7 @@ func TestClaudeStreamingUserFrame(t *testing.T) {
 
 func TestStreamingStdioDoesNotSendRawMarkdown(t *testing.T) {
 	s := &captureSender{}
-	if err := SendTurn(context.Background(), s, "# raw markdown", Options{Runtime: runtimekind.StreamingStdio}); err != nil {
+	if err := SendTurn(context.Background(), s, "# raw markdown", Options{Runtime: runtimes.ModeStreamingStdio}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.HasPrefix(string(s.last), "# raw") {
@@ -49,7 +49,7 @@ func TestStreamingStdioDoesNotSendRawMarkdown(t *testing.T) {
 
 func TestServeHTTPSendTurnUsesRawSendInput(t *testing.T) {
 	s := &captureSender{}
-	if err := SendTurn(context.Background(), s, "hello http", Options{Runtime: runtimekind.ServeHTTP}); err != nil {
+	if err := SendTurn(context.Background(), s, "hello http", Options{Runtime: runtimes.ModeHTTPSSE}); err != nil {
 		t.Fatal(err)
 	}
 	if string(s.last) != "hello http" {

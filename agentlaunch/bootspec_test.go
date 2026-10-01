@@ -3,6 +3,8 @@ package agentlaunch
 import (
 	"errors"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 func TestRuntimeBindingValidate(t *testing.T) {
@@ -10,7 +12,7 @@ func TestRuntimeBindingValidate(t *testing.T) {
 		b := RuntimeBinding{
 			Provider:    "codex",
 			Model:       "gpt-5",
-			RuntimeKind: RuntimeJsonRpcStdio,
+			RuntimeKind: runtimes.ModeJSONRPCStdio,
 			Args:        []string{"--fast"},
 			Timeout:     "30s",
 		}
@@ -20,7 +22,7 @@ func TestRuntimeBindingValidate(t *testing.T) {
 	})
 
 	t.Run("missing provider", func(t *testing.T) {
-		err := (RuntimeBinding{RuntimeKind: RuntimePTY}).Validate()
+		err := (RuntimeBinding{RuntimeKind: runtimes.ModePTY}).Validate()
 		if !errors.Is(err, ErrRuntimeBindingMissingProvider) {
 			t.Fatalf("Validate() error = %v, want ErrRuntimeBindingMissingProvider", err)
 		}
@@ -29,7 +31,7 @@ func TestRuntimeBindingValidate(t *testing.T) {
 	t.Run("invalid timeout", func(t *testing.T) {
 		err := (RuntimeBinding{
 			Provider:    "codex",
-			RuntimeKind: RuntimePTY,
+			RuntimeKind: runtimes.ModePTY,
 			Timeout:     "later",
 		}).Validate()
 		if !errors.Is(err, ErrRuntimeBindingInvalidTimeout) {
@@ -89,7 +91,7 @@ func TestBootSpecValidate(t *testing.T) {
 		Runtime: RuntimeBinding{
 			Provider:    "codex",
 			Model:       "gpt-5",
-			RuntimeKind: RuntimeJsonRpcStdio,
+			RuntimeKind: runtimes.ModeJSONRPCStdio,
 			Args:        []string{"serve"},
 			Timeout:     "30s",
 		},
@@ -107,7 +109,7 @@ func TestBootSpecRejectsDuplicateInputs(t *testing.T) {
 		},
 		Runtime: RuntimeBinding{
 			Provider:    "codex",
-			RuntimeKind: RuntimePTY,
+			RuntimeKind: runtimes.ModePTY,
 		},
 	}
 	err := spec.Validate()

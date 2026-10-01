@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"gopkg.in/yaml.v3"
 )
 
@@ -268,7 +269,7 @@ func TestDecodeContractEveryKind(t *testing.T) {
 func TestDecodeContractVocabularyKinds(t *testing.T) {
 	rb := RuntimeBindingContract{
 		Meta:    kindMeta(RegistryKindRuntimeBinding, "codex.jsonrpc"),
-		Binding: RuntimeBinding{Provider: "codex", RuntimeKind: RuntimeJsonRpcStdio},
+		Binding: RuntimeBinding{Provider: "codex", RuntimeKind: runtimes.ModeJSONRPCStdio},
 	}
 	if _, err := DecodeContract(RegistryKindRuntimeBinding, marshalYAML(t, rb)); err != nil {
 		t.Fatalf("DecodeContract(runtime-binding) = %v", err)
@@ -276,7 +277,7 @@ func TestDecodeContractVocabularyKinds(t *testing.T) {
 
 	bs := BootSpecContract{
 		Meta: kindMeta(RegistryKindBootSpec, "nanite.backend.boot"),
-		Spec: BootSpec{Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: RuntimeJsonRpcStdio}},
+		Spec: BootSpec{Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: runtimes.ModeJSONRPCStdio}},
 	}
 	if _, err := DecodeContract(RegistryKindBootSpec, marshalYAML(t, bs)); err != nil {
 		t.Fatalf("DecodeContract(boot-spec) = %v", err)

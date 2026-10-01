@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // TestResolveAbs covers the helper that filepath.Abs-resolves a single
@@ -55,7 +57,7 @@ func TestResolvePlanPaths(t *testing.T) {
 			Provider: ProviderSpec{
 				ID: "claude",
 			},
-			Runtime: RuntimePTY,
+			Runtime: runtimes.ModePTY,
 			Workspace: WorkspaceSpec{
 				Mode: WorkspaceShared,
 			},
@@ -89,7 +91,7 @@ func TestResolvePlanPaths(t *testing.T) {
 			Provider: ProviderSpec{
 				ID: "claude",
 			},
-			Runtime: RuntimePTY,
+			Runtime: runtimes.ModePTY,
 			Workspace: WorkspaceSpec{
 				Mode:         WorkspaceFresh,
 				Workdir:      "rel/workdir",

@@ -3,16 +3,18 @@ package providerplant
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/registry"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 )
 
 func TestDefaultResolver_Claude(t *testing.T) {
-	a, err := DefaultResolver(compiledFor(t, "claude", agentlaunch.RuntimePTY))
+	a, err := DefaultResolver(compiledFor(t, "claude", runtimes.ModePTY))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -26,7 +28,7 @@ func TestDefaultResolver_Claude(t *testing.T) {
 // makes the planted boot dir carry the non-interactive approval contract.
 func TestDefaultResolver_PermissionThreading(t *testing.T) {
 	// claude: Provider.Permission → ClaudeAdapter.PermissionMode.
-	cc := compiledFor(t, "claude", agentlaunch.RuntimePTY)
+	cc := compiledFor(t, "claude", runtimes.ModePTY)
 	cc.Plan.Provider.Permission = "acceptEdits"
 	a, err := DefaultResolver(cc)
 	if err != nil {
@@ -41,7 +43,7 @@ func TestDefaultResolver_PermissionThreading(t *testing.T) {
 	}
 
 	// codex: Provider.Permission → CodexAdapter.ApprovalPolicy.
-	cx := compiledFor(t, "codex", agentlaunch.RuntimeSubprocess)
+	cx := compiledFor(t, "codex", runtimes.ModeSubprocessPerTurn)
 	cx.Plan.Provider.Permission = "on-request"
 	c, err := DefaultResolver(cx)
 	if err != nil {
@@ -57,7 +59,7 @@ func TestDefaultResolver_PermissionThreading(t *testing.T) {
 
 	// Empty Permission → the adapter field stays empty (claude: the caller
 	// must set it; codex: go-providers defaults ApprovalPolicy to "never").
-	empty, err := DefaultResolver(compiledFor(t, "claude", agentlaunch.RuntimePTY))
+	empty, err := DefaultResolver(compiledFor(t, "claude", runtimes.ModePTY))
 	if err != nil {
 		t.Fatalf("resolve claude (empty permission): %v", err)
 	}
@@ -67,7 +69,7 @@ func TestDefaultResolver_PermissionThreading(t *testing.T) {
 }
 
 func TestDefaultResolver_CodexExecVsAppServer(t *testing.T) {
-	exec, err := DefaultResolver(compiledFor(t, "codex", agentlaunch.RuntimeSubprocess))
+	exec, err := DefaultResolver(compiledFor(t, "codex", runtimes.ModeSubprocessPerTurn))
 	if err != nil {
 		t.Fatalf("resolve exec: %v", err)
 	}
@@ -75,7 +77,7 @@ func TestDefaultResolver_CodexExecVsAppServer(t *testing.T) {
 		t.Errorf("subprocess runtime: got %T mode=%q, want exec-mode CodexAdapter", exec, modeOf(exec))
 	}
 
-	app, err := DefaultResolver(compiledFor(t, "codex", agentlaunch.RuntimeJsonRpcStdio))
+	app, err := DefaultResolver(compiledFor(t, "codex", runtimes.ModeJSONRPCStdio))
 	if err != nil {
 		t.Fatalf("resolve app-server: %v", err)
 	}
@@ -85,7 +87,7 @@ func TestDefaultResolver_CodexExecVsAppServer(t *testing.T) {
 }
 
 func TestDefaultResolver_Opencode(t *testing.T) {
-	a, err := DefaultResolver(compiledFor(t, "opencode", agentlaunch.RuntimeSubprocess))
+	a, err := DefaultResolver(compiledFor(t, "opencode", runtimes.ModeSubprocessPerTurn))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -95,6 +97,35 @@ func TestDefaultResolver_Opencode(t *testing.T) {
 	}
 	if oc.Agent != "agent-name" {
 		t.Errorf("OpencodeAdapter.Agent = %q, want agent-name (from AgentSpec.Name)", oc.Agent)
+	}
+}
+
+// An ACP-only runtime (no layout, no boot dir) has no native adapter to
+// plant; the resolver says so instead of guessing.
+func TestDefaultResolver_ACPOnlyHasNoNativeAdapter(t *testing.T) {
+	for _, id := range []string{"copilot", "pi"} {
+		if _, err := DefaultResolver(compiledFor(t, id, runtimes.ModeACPStdio)); !errors.Is(err, ErrNoNativeAdapter) {
+			t.Errorf("%s: err = %v, want ErrNoNativeAdapter", id, err)
+		}
+	}
+}
+
+// A registry runtime with a native mode resolves in the matrix, but planting
+// it still needs a constructor case in DefaultResolver (CW-20260930-0134); the
+// error says so instead of claiming the runtime is ACP-only.
+func TestDefaultResolver_NewNativeRuntimeNeedsAConstructor(t *testing.T) {
+	registry.RegisterForTest(t, registry.Descriptor{
+		ID:          "fake-cli",
+		Binary:      "fake-cli",
+		EnvOverride: "FAKE_CLI_PATH",
+		Modes:       []registry.ModeSupport{{Mode: runtimes.ModeSubprocessPerTurn}},
+		DefaultMode: runtimes.ModeSubprocessPerTurn,
+	})
+	compiled := compiledFor(t, "claude", runtimes.ModeSubprocessPerTurn)
+	compiled.Plan.Provider.ID = "fake-cli"
+	_, err := DefaultResolver(compiled)
+	if !errors.Is(err, ErrNoNativeAdapter) || !strings.Contains(err.Error(), "no native adapter constructor") || strings.Contains(err.Error(), "ACP") {
+		t.Fatalf("DefaultResolver(fake-cli) = %v, want ErrNoNativeAdapter naming the missing constructor", err)
 	}
 }
 
@@ -108,7 +139,7 @@ func TestDefaultResolver_NilCompiled(t *testing.T) {
 // lookup — here a plain codex adapter planted for a claude launch.
 func TestPlant_WithAdapterOverride(t *testing.T) {
 	isolateHome(t)
-	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, "claude", agentlaunch.RuntimePTY))
+	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, "claude", runtimes.ModePTY))
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}

@@ -6,19 +6,20 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 )
 
 // compiledFor compiles a minimal valid launch for the given
 // provider×runtime pair with no injection.
-func compiledFor(t *testing.T, providerID string, runtime agentlaunch.RuntimeKind) *agentlaunch.CompiledLaunch {
+func compiledFor(t *testing.T, providerID string, runtime runtimes.Mode) *agentlaunch.CompiledLaunch {
 	t.Helper()
 	return compiledWith(t, providerID, runtime, agentlaunch.InjectionSpec{})
 }
 
 // compiledWith is compiledFor with a caller-supplied InjectionSpec.
-func compiledWith(t *testing.T, providerID string, runtime agentlaunch.RuntimeKind, inj agentlaunch.InjectionSpec) *agentlaunch.CompiledLaunch {
+func compiledWith(t *testing.T, providerID string, runtime runtimes.Mode, inj agentlaunch.InjectionSpec) *agentlaunch.CompiledLaunch {
 	t.Helper()
 	plan := agentlaunch.LaunchPlan{
 		Project:   agentlaunch.ProjectSpec{ID: "proj", Name: "Project", Root: t.TempDir()},
@@ -44,7 +45,7 @@ func compiledWith(t *testing.T, providerID string, runtime agentlaunch.RuntimeKi
 }
 
 // preparedFor compiles + prepares (no plant) a launch.
-func preparedFor(t *testing.T, providerID string, runtime agentlaunch.RuntimeKind) *agentlaunch.PreparedLaunch {
+func preparedFor(t *testing.T, providerID string, runtime runtimes.Mode) *agentlaunch.PreparedLaunch {
 	t.Helper()
 	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, providerID, runtime))
 	if err != nil {

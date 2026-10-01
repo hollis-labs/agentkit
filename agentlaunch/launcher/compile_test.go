@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
 )
@@ -23,7 +24,7 @@ func validPlanForCompile() agentlaunch.LaunchPlan {
 		Provider: agentlaunch.ProviderSpec{
 			ID: "claude",
 		},
-		Runtime: agentlaunch.RuntimePTY,
+		Runtime: runtimes.ModePTY,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:         agentlaunch.WorkspaceShared,
 			WorkspaceDir: "/abs/ws",
@@ -68,7 +69,7 @@ func TestCompileHeadlessClaudeNeedsPermission(t *testing.T) {
 	// `never`, so a headless codex with no permission does not hang.
 	p = validPlanForCompile()
 	p.Provider.ID = "codex"
-	p.Runtime = agentlaunch.RuntimeSubprocess
+	p.Runtime = runtimes.ModeSubprocessPerTurn
 	p.Mode = agentlaunch.LaunchBackground
 	if _, err := Compile(context.Background(), p); err != nil {
 		t.Errorf("background codex, empty Permission: Compile = %v, want nil (codex is exempt)", err)
@@ -112,45 +113,45 @@ func TestCompileHappyPathDefaultsClaudePty(t *testing.T) {
 	}
 }
 
-// TestCompileBootDirIntentDefaults locks in the per-provider bootdir
-// intent the brief specified. Each row uses a (provider, runtime) pair
-// that the matrix accepts.
+// TestCompileBootDirIntentDefaults pins that the bootdir intent is read
+// from go-providers' layout table: the instructions, boot and MCP rows of the
+// plan's runtime and mode. An ACP-only runtime has no layout and no intent.
 func TestCompileBootDirIntentDefaults(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider string
-		runtime  agentlaunch.RuntimeKind
+		runtime  runtimes.Mode
 		want     agentlaunch.BootDirIntent
 	}{
 		{
-			name:     "claude/pty → agentrc.yaml + .mcp.json",
+			name:     "claude/pty",
 			provider: "claude",
-			runtime:  agentlaunch.RuntimePTY,
-			want: agentlaunch.BootDirIntent{
-				PerProviderBootFile: "agentrc.yaml",
-				TransientBootFile:   "",
-				MCPDescriptorFile:   ".mcp.json",
-			},
+			runtime:  runtimes.ModePTY,
+			want:     agentlaunch.BootDirIntent{PerProviderBootFile: "CLAUDE.md", TransientBootFile: "boot.md", MCPDescriptorFile: ".mcp.json"},
 		},
 		{
-			name:     "codex/jsonrpc-stdio → config.toml + .mcp.json",
+			name:     "codex/jsonrpc-stdio",
 			provider: "codex",
-			runtime:  agentlaunch.RuntimeJsonRpcStdio,
-			want: agentlaunch.BootDirIntent{
-				PerProviderBootFile: "config.toml",
-				TransientBootFile:   "",
-				MCPDescriptorFile:   ".mcp.json",
-			},
+			runtime:  runtimes.ModeJSONRPCStdio,
+			want:     agentlaunch.BootDirIntent{PerProviderBootFile: "AGENTS.md", TransientBootFile: "boot.md", MCPDescriptorFile: ".mcp.json"},
 		},
 		{
-			name:     "opencode/subprocess → OPENCODE.md + .mcp.json",
+			name:     "opencode/subprocess-per-turn names the agent file",
 			provider: "opencode",
-			runtime:  agentlaunch.RuntimeSubprocess,
-			want: agentlaunch.BootDirIntent{
-				PerProviderBootFile: "",
-				TransientBootFile:   "OPENCODE.md",
-				MCPDescriptorFile:   ".mcp.json",
-			},
+			runtime:  runtimes.ModeSubprocessPerTurn,
+			want:     agentlaunch.BootDirIntent{PerProviderBootFile: "agents/Agent.md", TransientBootFile: "boot.md", MCPDescriptorFile: ".mcp.json"},
+		},
+		{
+			name:     "antigravity/subprocess-per-turn",
+			provider: "agy",
+			runtime:  runtimes.ModeSubprocessPerTurn,
+			want:     agentlaunch.BootDirIntent{PerProviderBootFile: "AGENTS.md", TransientBootFile: "boot.md", MCPDescriptorFile: ".agents/plugins/tether/mcp_config.json"},
+		},
+		{
+			name:     "copilot/acp-stdio has no layout",
+			provider: "copilot",
+			runtime:  runtimes.ModeACPStdio,
+			want:     agentlaunch.BootDirIntent{},
 		},
 	}
 
@@ -222,7 +223,7 @@ func TestCompileValidationWraps(t *testing.T) {
 func TestCompileMatrixErrorWraps(t *testing.T) {
 	plan := validPlanForCompile()
 	plan.Provider.ID = "claude"
-	plan.Runtime = agentlaunch.RuntimeJsonRpcStdio // not a legal pair for claude
+	plan.Runtime = runtimes.ModeJSONRPCStdio // not a legal pair for claude
 
 	_, err := Compile(context.Background(), plan,
 		WithNow(func() time.Time { return fixedTime }),

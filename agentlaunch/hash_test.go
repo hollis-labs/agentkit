@@ -3,6 +3,8 @@ package agentlaunch
 import (
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // validPlanForHash returns a plan whose Validate would pass but
@@ -20,7 +22,7 @@ func validPlanForHash() LaunchPlan {
 				"MID":   "m",
 			},
 		},
-		Runtime: RuntimePTY,
+		Runtime: runtimes.ModePTY,
 		Workspace: WorkspaceSpec{
 			Mode:         WorkspaceShared,
 			WorkspaceDir: "/abs/ws",
@@ -77,7 +79,7 @@ func TestHashLaunchPlanDifferentPlanDifferentHash(t *testing.T) {
 		{"project.id", func(p *LaunchPlan) { p.Project.ID = "other" }},
 		{"agent.id", func(p *LaunchPlan) { p.Agent.ID = "other" }},
 		{"provider.id", func(p *LaunchPlan) { p.Provider.ID = "codex" }},
-		{"runtime", func(p *LaunchPlan) { p.Runtime = RuntimeSubprocess }},
+		{"runtime", func(p *LaunchPlan) { p.Runtime = runtimes.ModeSubprocessPerTurn }},
 		{"workspace.mode", func(p *LaunchPlan) { p.Workspace.Mode = WorkspaceTemp }},
 		{"workspace.workspace_dir", func(p *LaunchPlan) { p.Workspace.WorkspaceDir = "/abs/other" }},
 		{"mode", func(p *LaunchPlan) { p.Mode = LaunchBackground }},

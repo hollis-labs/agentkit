@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentcontext"
 	"github.com/hollis-labs/agentkit/agentcontext/resolvers"
 
@@ -25,7 +26,7 @@ func newCompiled(t *testing.T) *agentlaunch.CompiledLaunch {
 		Project:  agentlaunch.ProjectSpec{ID: "proj", Name: "Project", Root: root},
 		Agent:    agentlaunch.AgentSpec{ID: "agent", Name: "Agent"},
 		Provider: agentlaunch.ProviderSpec{ID: "claude"},
-		Runtime:  agentlaunch.RuntimePTY,
+		Runtime:  runtimes.ModePTY,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:         agentlaunch.WorkspaceShared,
 			WorkspaceDir: root,

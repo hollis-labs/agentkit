@@ -4,6 +4,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // sampleAssembly builds a representative AssemblySpec exercising typed
@@ -25,7 +27,7 @@ func sampleAssembly() AssemblySpec {
 					Phase:     VarPhaseBuild,
 				},
 			},
-			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: RuntimePTY},
+			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: runtimes.ModePTY},
 		},
 		Template: "Ticket: {{ inputs.ticket }}\nRole: {{inputs.role}}\nVerbose: {{ inputs.verbose }}\nSummary: {{ vars.role_summary }}\n",
 	}
@@ -195,7 +197,7 @@ func TestRenderMissingOrderingDeterministic(t *testing.T) {
 					Phase:     VarPhaseBuild,
 				},
 			},
-			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: RuntimePTY},
+			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: runtimes.ModePTY},
 		},
 		Template: "{{ inputs.zeta }}{{ inputs.alpha }}{{ vars.wvar }}{{ vars.avar }}",
 	}
@@ -214,7 +216,7 @@ func TestRenderEscapedBraces(t *testing.T) {
 	a := AssemblySpec{
 		BootSpec: BootSpec{
 			Inputs:  []BootInput{{Name: "name", Type: "string", Default: "world"}},
-			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: RuntimePTY},
+			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: runtimes.ModePTY},
 		},
 		Template: "literal {{{{ inputs.name }}}} and real {{ inputs.name }}",
 	}
@@ -275,7 +277,7 @@ func TestAssemblySpecValidateInheritsBootSpecContract(t *testing.T) {
 				{Name: "dup", Type: "string"},
 				{Name: "dup", Type: "string"},
 			},
-			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: RuntimePTY},
+			Runtime: RuntimeBinding{Provider: "codex", RuntimeKind: runtimes.ModePTY},
 		},
 	}
 	err := a.Validate()

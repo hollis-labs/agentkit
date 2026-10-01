@@ -28,10 +28,10 @@ var (
 	// of the three declared LaunchMode values.
 	ErrUnsupportedLaunchMode = errors.New("agentlaunch: unsupported launch mode")
 
-	// ErrUnknownRuntime is returned when LaunchPlan.Runtime is not one of
-	// the four declared RuntimeKind values. This is a value-level check;
-	// the provider × runtime support matrix (which legal (provider, runtime)
-	// pairs exist) lives in a sibling package and is NOT enforced here.
+	// ErrUnknownRuntime is returned when LaunchPlan.Runtime is not a
+	// runtimes.Mode. This is a value-level check; which runtime supports
+	// which mode is the matrix package's (from the go-providers registry)
+	// and is NOT enforced here.
 	ErrUnknownRuntime = errors.New("agentlaunch: unknown runtime kind")
 
 	// ErrMissingBootProfile is returned when neither
@@ -67,6 +67,11 @@ var (
 	// ErrPreparedMissingArgv is returned by PreparedLaunch.Validate when
 	// Argv has length zero — at minimum the spawned binary must be named.
 	ErrPreparedMissingArgv = errors.New("agentlaunch: prepared launch missing argv")
+
+	// ErrNoSkillRoot is returned by SkillRelPath when go-providers' layout
+	// has no skills row for the runtime: it is not in the registry, or it
+	// is ACP-only and has no boot dir.
+	ErrNoSkillRoot = errors.New("agentlaunch: runtime has no skill root")
 
 	// ErrUnknownNativeFileKind is returned by NativeFile.Validate when
 	// NativeFile.Kind is not one of the declared NativeFileKind values.

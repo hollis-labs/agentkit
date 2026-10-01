@@ -8,7 +8,7 @@
 //
 // The matrix subpackage (which Compile and Prepare consult to validate
 // the provider × runtime pair) already imports agentlaunch for the
-// shared type vocabulary (RuntimeKind, ProviderSpec). Hosting Compile /
+// shared type vocabulary (ProviderSpec). Hosting Compile /
 // Prepare at the top of the agentlaunch package would create an
 // import cycle: agentlaunch → matrix → agentlaunch. The launcher
 // subpackage breaks the cycle by sitting BELOW both agentlaunch and
@@ -24,7 +24,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/go-providers/layout"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
@@ -105,24 +109,17 @@ func WithSourceCatalog(name, version string) CompileOption {
 //
 // # BootDirIntent defaults
 //
-// The compiler maps each provider's bootdir-renderer key to a small set
-// of app-neutral relative-path defaults that reflect the layout each
-// provider's CLI already expects:
+// The intent is read from go-providers' layout table for the plan's runtime
+// and mode, the same rows the provider projection plants, so it names what
+// the harness actually reads:
 //
-//   - claude   → agentrc.yaml + .mcp.json (no transient boot file; the
-//     boot body is concatenated into the agentrc body by go-providers'
-//     Claude planter, with .mcp.json next to it).
-//   - codex    → config.toml + .mcp.json (codex CLI reads its top-level
-//     config from config.toml; the MCP descriptor lives alongside).
-//   - opencode → OPENCODE.md (transient) + .mcp.json (opencode reads its
-//     per-session prompt from OPENCODE.md; the MCP descriptor is shared).
-//   - antigravity → AGENTS.md + .agents/plugins/tether/mcp_config.json
-//     (agy reads rules from AGENTS.md and MCP servers from a workspace
-//     plugin; it has no config-dir variable).
+//   - PerProviderBootFile: the instructions row (CLAUDE.md, AGENTS.md,
+//     OpenCode's agents/<agent>.md).
+//   - TransientBootFile: the boot row (boot.md).
+//   - MCPDescriptorFile: the MCP row (.mcp.json, or agy's
+//     .agents/plugins/tether/mcp_config.json).
 //
-// Phase 3 hook implementations may override these defaults; the
-// compiler's job is to provide a sensible starting layout the preparer
-// can plant against.
+// A runtime with no layout (ACP-only: Copilot, Pi) gets an empty intent.
 func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOption) (*agentlaunch.CompiledLaunch, error) {
 	_ = ctx // reserved for future use (cancellation while doing IO-free work is unnecessary today)
 	options := CompileOptions{}
@@ -145,7 +142,7 @@ func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOp
 	// than emit a CompiledLaunch that is structurally guaranteed to hang.
 	// codex is exempt — go-providers defaults an empty approval_policy to
 	// `never`; an `interactive` launch is exempt — a human can answer.
-	if desc.BootDirRenderer == matrix.BootDirRendererClaude &&
+	if desc.ProviderID == runtimes.Claude &&
 		plan.Mode != agentlaunch.LaunchInteractive &&
 		plan.Provider.Permission == "" {
 		return nil, fmt.Errorf("%w (launch mode %q): set Provider.Permission to acceptEdits / plan / bypassPermissions",
@@ -167,7 +164,7 @@ func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOp
 		now = func() time.Time { return time.Now().UTC() }
 	}
 
-	intent := bootDirIntentFor(desc.BootDirRenderer)
+	intent := bootDirIntentFor(desc, agentName(&resolved))
 
 	compiled := &agentlaunch.CompiledLaunch{
 		Plan:          &resolved,
@@ -181,15 +178,9 @@ func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOp
 		},
 	}
 
-	// Resolve the provider binary at compile-time only when an override
-	// is set — PATH resolution happens at prepare-time, but the matrix
-	// already gives us the default binary name and we can record what
-	// the caller requested.
-	if plan.Provider.Binary != "" {
-		compiled.ResolvedProviderBinary = plan.Provider.Binary
-	} else if desc.Caps.BinaryRequired {
-		compiled.ResolvedProviderBinary = desc.BinaryName
-	}
+	// Record the binary: the plan's override, else the registry's binary
+	// name. PATH resolution happens at prepare time.
+	compiled.ResolvedProviderBinary = desc.BinaryName
 
 	if plan.Project.Root != "" {
 		compiled.ResolvedProjectRoot = resolved.Project.Root
@@ -202,37 +193,30 @@ func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOp
 	return compiled, nil
 }
 
-// bootDirIntentFor returns the app-neutral default bootdir layout the
-// compiler attaches to a CompiledLaunch given the matrix's
-// BootDirRenderer key. See Compile's godoc for the per-provider
-// rationale.
-func bootDirIntentFor(r matrix.BootDirRenderer) agentlaunch.BootDirIntent {
-	switch r {
-	case matrix.BootDirRendererClaude:
-		return agentlaunch.BootDirIntent{
-			PerProviderBootFile: "agentrc.yaml",
-			TransientBootFile:   "",
-			MCPDescriptorFile:   ".mcp.json",
+// bootDirIntentFor returns the bootdir layout the compiler attaches to a
+// CompiledLaunch, read from the layout table rows for the descriptor's
+// runtime and mode. See Compile's godoc.
+func bootDirIntentFor(desc matrix.Descriptor, agent string) agentlaunch.BootDirIntent {
+	shape := layout.Shape{Mode: desc.Runtime}
+	rel := func(c layout.Concern) string {
+		e, ok := layout.Find(desc.ProviderID, shape, c)
+		if !ok || e.Root != layout.RootBoot {
+			return ""
 		}
-	case matrix.BootDirRendererCodex:
-		return agentlaunch.BootDirIntent{
-			PerProviderBootFile: "config.toml",
-			TransientBootFile:   "",
-			MCPDescriptorFile:   ".mcp.json",
-		}
-	case matrix.BootDirRendererOpencode:
-		return agentlaunch.BootDirIntent{
-			PerProviderBootFile: "",
-			TransientBootFile:   "OPENCODE.md",
-			MCPDescriptorFile:   ".mcp.json",
-		}
-	case matrix.BootDirRendererAntigravity:
-		return agentlaunch.BootDirIntent{
-			PerProviderBootFile: "AGENTS.md",
-			TransientBootFile:   "",
-			MCPDescriptorFile:   ".agents/plugins/tether/mcp_config.json",
-		}
-	default:
-		return agentlaunch.BootDirIntent{}
+		return strings.ReplaceAll(e.Rel, layout.AgentPlaceholder, agent)
 	}
+	return agentlaunch.BootDirIntent{
+		PerProviderBootFile: rel(layout.Instructions),
+		TransientBootFile:   rel(layout.Boot),
+		MCPDescriptorFile:   rel(layout.MCP),
+	}
+}
+
+// agentName is the name a provider's agent file is planted under:
+// AgentSpec.Name, then AgentSpec.ID (the providerplant precedence).
+func agentName(plan *agentlaunch.LaunchPlan) string {
+	if plan.Agent.Name != "" {
+		return plan.Agent.Name
+	}
+	return plan.Agent.ID
 }
