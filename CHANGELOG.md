@@ -20,6 +20,11 @@ Requires go-providers v0.40.0.
     `turn/start` runs on the same process and thread.
   - With no turn open it sends nothing. A turn that ends while the request is
     in flight is not an error.
+- **The jsonrpc-stdio session's own request ids start at 2^32.** A host can
+  also drive the runtime with raw frames through `SendInput`, numbered from
+  1; the wrapper's Codex hosts do that. A session `Call`, such as
+  `InterruptTurn`'s `turn/interrupt`, must not reuse an id one of those
+  frames has in flight.
 - **The serve-http session implements `TurnInterrupter`** with OpenCode's
   `POST /session/{id}/abort`. The turn ends with one error event, and the
   server and session stay up for the next `SendInput`.

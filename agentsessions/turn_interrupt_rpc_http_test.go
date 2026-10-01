@@ -111,6 +111,13 @@ func TestJsonRpcStdioSession_InterruptTurnKeepsTheProcess(t *testing.T) {
 			if !strings.Contains(line, `"turnId":"00000000-0000-4000-8000-000000000003"`) {
 				t.Errorf("turn/interrupt names another turn: %s", line)
 			}
+			// The session's own ids stay clear of a host's raw ones.
+			var req struct {
+				ID int64 `json:"id"`
+			}
+			if json.Unmarshal([]byte(line), &req) != nil || req.ID <= callIDBase {
+				t.Errorf("turn/interrupt id %d is not above callIDBase", req.ID)
+			}
 		}
 	}
 	if interrupts != 1 {
