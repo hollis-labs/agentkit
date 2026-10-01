@@ -4,6 +4,20 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.1 — 2026-10-01
+
+Follow-up to v0.20.0 (CW-20261001-0160).
+
+### Fixed
+
+- **The jsonrpc-stdio session's own request ids start at 2^32**
+  (`callIDBase`). Hosts can drive Codex app-server with raw frames through
+  `SendInput`, numbered from 1, and the wrapper's Codex hosts do. Until
+  v0.20.0 the session made no requests of its own beside those frames.
+  `InterruptTurn`'s `turn/interrupt` is one, and with ids from 1 it could
+  reuse an id a host request still had in flight, so the two responses
+  would be confused. The Codex interrupt test checks the id it sends.
+
 ## v0.20.0 — 2026-10-01
 
 Turn interrupts for Codex app-server and OpenCode serve (CW-20261001-0160).
@@ -20,11 +34,6 @@ Requires go-providers v0.40.0.
     `turn/start` runs on the same process and thread.
   - With no turn open it sends nothing. A turn that ends while the request is
     in flight is not an error.
-- **The jsonrpc-stdio session's own request ids start at 2^32.** A host can
-  also drive the runtime with raw frames through `SendInput`, numbered from
-  1; the wrapper's Codex hosts do that. A session `Call`, such as
-  `InterruptTurn`'s `turn/interrupt`, must not reuse an id one of those
-  frames has in flight.
 - **The serve-http session implements `TurnInterrupter`** with OpenCode's
   `POST /session/{id}/abort`. The turn ends with one error event, and the
   server and session stay up for the next `SendInput`.
