@@ -17,8 +17,8 @@ github.com/hollis-labs/go-runner v0.7.0 h1:nJIDnZHBVn1Ii8hITTxLsGMVaEI9AWipar85q
 github.com/hollis-labs/go-runner v0.7.0/go.mod h1:+PgCa0CxAImd63sZgLb8Zw0uasyDWyHRdcE2sH8Zc7Q=
 github.com/hollis-labs/go-safefs v0.1.0 h1:DOlOS/0OnLKgUXON9YiPTzZZyYhqogNUo9RoYpa7UOY=
 github.com/hollis-labs/go-safefs v0.1.0/go.mod h1:cy6lXh6KhPuIoQ9hGQSL+sd4N1dhJ1hE3sSCMXNB6JA=
-github.com/hollis-labs/go-sandbox v0.4.1 h1:Ul2hSUK5f8shvpORBuy33GEUelD7bu9v4tNKVqzmn9k=
-github.com/hollis-labs/go-sandbox v0.4.1/go.mod h1:cZVYQKfEze0jFkt7iyvvUTAc7M+7tppRxpq/h8VYUYg=
+github.com/hollis-labs/go-sandbox v0.5.0 h1:VRuIVNKr6X/EFeNzOSPrhJkTWbfCyKwzPT16EYvRhKo=
+github.com/hollis-labs/go-sandbox v0.5.0/go.mod h1:cZVYQKfEze0jFkt7iyvvUTAc7M+7tppRxpq/h8VYUYg=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
