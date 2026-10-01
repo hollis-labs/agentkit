@@ -1,4 +1,10 @@
 // Package turn frames user turns before they are sent to go-agent-sessions.
+//
+// It also carries the Codex app-server client protocol shared by every app:
+// CodexAppServerSession and CodexAppServerCache bind a thread (starting one,
+// or resuming a stored one) and send turns on it, the Codex notification
+// parsers read what comes back, and CodexApprovalResponder answers the
+// approval requests Codex sends the client, from a go-permission Mode.
 package turn
 
 import (
@@ -6,15 +12,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
 var (
 	ErrUnsupportedRuntime = errors.New("turn: unsupported runtime")
 	ErrMissingThreadID    = errors.New("turn: missing codex thread id")
+	// ErrCodexThreadMismatch is the Err of the SessionLostError returned when
+	// thread/resume answers with a thread other than the one requested.
+	ErrCodexThreadMismatch = errors.New("turn: codex resumed a different thread than requested")
 )
 
 type Options struct {
@@ -56,8 +67,8 @@ func Frame(text string, opts Options) ([]byte, error) {
 // typed call when the sender exposes JSONRPCSender; otherwise it falls back to a
 // serialized request-shaped frame for adapters that own the final method.
 // Codex app-server callers should use CodexAppServerSession or
-// CodexAppServerCache so the initialize/thread-start protocol and cached thread
-// id are shared.
+// CodexAppServerCache so the initialize/thread-binding protocol and cached
+// thread id are shared.
 func SendTurn(ctx context.Context, sender Sender, text string, opts Options) error {
 	if runtimekind.Parse(string(opts.Runtime)) == runtimekind.JSONRPCStdio {
 		if rpc, ok := sender.(JSONRPCSender); ok {
@@ -76,6 +87,19 @@ type CodexAppServerOptions struct {
 	ClientName    string
 	ClientVersion string
 	CWD           string
+	// ResumeThreadID, when set, continues an existing Codex thread: the
+	// session binds its thread with thread/resume instead of thread/start.
+	// It is consulted only while the session has no thread bound yet, so a
+	// caller can pass its stored provider session id on every turn.
+	//
+	// A resume that fails is returned as an error and never falls back to a
+	// fresh thread, because a caller that asked to resume and got a new
+	// thread would lose its history without being told. When Codex no
+	// longer has the thread, the error is an *agentsessions.SessionLostError
+	// (errors.Is(err, provider.ErrProviderSessionLost) holds). The session
+	// stays unbound, so the next turn tries the resume again; to start over
+	// on a new thread, Reset or Forget the session and clear this field.
+	ResumeThreadID string
 }
 
 type CodexAppServerSession struct {
@@ -104,9 +128,10 @@ func (s *CodexAppServerSession) Reset() {
 }
 
 // SendTurn drives the Codex app-server JSON-RPC protocol: initialize once,
-// thread/start once, cache thread.id, then turn/start for each user turn.
-// Turn completion is reported by Codex notifications, not the turn/start
-// response.
+// bind a thread once (thread/resume when opts.ResumeThreadID is set,
+// thread/start otherwise), cache thread.id, then turn/start for each user
+// turn. Turn completion is reported by Codex notifications, not the
+// turn/start response.
 func (s *CodexAppServerSession) SendTurn(ctx context.Context, rpc JSONRPCSender, text string, opts CodexAppServerOptions) error {
 	if s == nil {
 		return errors.New("turn: nil codex app-server session")
@@ -123,11 +148,7 @@ func (s *CodexAppServerSession) SendTurn(ctx context.Context, rpc JSONRPCSender,
 		s.initialized = true
 	}
 	if s.threadID == "" {
-		res, err := rpc.Call(ctx, "thread/start", codexThreadStartParams(opts))
-		if err != nil {
-			return fmt.Errorf("jsonrpc thread/start: %w", err)
-		}
-		threadID, err := DecodeCodexThreadID(res)
+		threadID, err := bindCodexThread(ctx, rpc, opts)
 		if err != nil {
 			return err
 		}
@@ -170,6 +191,62 @@ func (c *CodexAppServerCache) Forget(key string) {
 		return
 	}
 	c.m.Delete(key)
+}
+
+// bindCodexThread resumes opts.ResumeThreadID when it is set and starts a new
+// thread otherwise, returning the bound thread id.
+func bindCodexThread(ctx context.Context, rpc JSONRPCSender, opts CodexAppServerOptions) (string, error) {
+	if opts.ResumeThreadID == "" {
+		res, err := rpc.Call(ctx, "thread/start", codexThreadStartParams(opts))
+		if err != nil {
+			return "", fmt.Errorf("jsonrpc thread/start: %w", err)
+		}
+		return DecodeCodexThreadID(res)
+	}
+	requested := opts.ResumeThreadID
+	res, err := rpc.Call(ctx, "thread/resume", codexThreadResumeParams(opts))
+	if err != nil {
+		if isCodexThreadLost(err) {
+			return "", &agentsessions.SessionLostError{RequestedID: requested, Err: fmt.Errorf("jsonrpc thread/resume: %w", err)}
+		}
+		return "", fmt.Errorf("jsonrpc thread/resume %q: %w", requested, err)
+	}
+	actual, err := DecodeCodexThreadID(res)
+	if err != nil {
+		return "", fmt.Errorf("jsonrpc thread/resume %q: %w", requested, err)
+	}
+	if actual != requested {
+		// Codex answered with a different thread than the one asked for.
+		// Binding it would continue in a thread without the requested
+		// history, which is the silent fallback this path refuses.
+		return "", &agentsessions.SessionLostError{RequestedID: requested, ActualID: actual, Err: ErrCodexThreadMismatch}
+	}
+	return actual, nil
+}
+
+// codexThreadLostMarkers are the thread/resume error messages that mean Codex
+// does not have the requested thread, as codex-cli 0.159 words them:
+// "no rollout found for thread id <id>" for a well-formed id with no stored
+// rollout, and "invalid session id: ..." for an id Codex cannot parse, which
+// no rollout can ever match. Any other thread/resume failure is returned as
+// a plain error.
+var codexThreadLostMarkers = []string{
+	"no rollout found",
+	"invalid session id",
+}
+
+func isCodexThreadLost(err error) bool {
+	msg := err.Error()
+	var rpcErr *agentsessions.JsonRpcError
+	if errors.As(err, &rpcErr) {
+		msg = rpcErr.Message
+	}
+	for _, marker := range codexThreadLostMarkers {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func DecodeCodexThreadID(raw json.RawMessage) (string, error) {
@@ -219,6 +296,20 @@ func codexInitializeParams(opts CodexAppServerOptions) map[string]any {
 
 func codexThreadStartParams(opts CodexAppServerOptions) map[string]any {
 	params := map[string]any{}
+	if opts.CWD != "" {
+		params["cwd"] = opts.CWD
+	}
+	return params
+}
+
+// codexThreadResumeParams asks for thread metadata only. Without
+// excludeTurns the response carries the thread's whole history on one line,
+// which for a long thread can outgrow the JSON-RPC stdio reader's line limit.
+func codexThreadResumeParams(opts CodexAppServerOptions) map[string]any {
+	params := map[string]any{
+		"threadId":     opts.ResumeThreadID,
+		"excludeTurns": true,
+	}
 	if opts.CWD != "" {
 		params["cwd"] = opts.CWD
 	}
