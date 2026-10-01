@@ -4,6 +4,40 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.16.0 — 2026-10-01
+
+### Security
+
+- **`turn.CodexApprovalResponder.MCPAllow`** limits which MCP tool calls the
+  `default` and `accept-edits` postures approve (CW-20261001-0084).
+  - **Before:** both postures approved every MCP tool call from every
+    planted server. A host planting the mux server therefore let a worker
+    call `cerberus_ssh_exec` or `cerberus_docker_destroy` with nothing
+    asking. Torque carved out its own rule to prevent that.
+  - **Entries:** each is `server` (every tool on it) or `server/tool`.
+    Both halves are `path.Match` patterns, for example
+    `mux/torque_*`.
+  - **Behaviour:**
+    - With entries, a call that matches none is declined. The decline
+      reason names the server, the tool and the allow-list.
+    - `plan` still declines every call, and `yolo` still approves every
+      call.
+    - Validate rejects malformed entries.
+  - **Names, as Codex sends them:**
+    - The server is the elicitation's `serverName`.
+    - The tool is `_meta.tool_name` when Codex sends it. codex-cli 0.154.0
+      to 0.159.2 doesn't, so otherwise it is the name quoted in the
+      approval message (`Allow the <server> MCP server to run tool
+      "<tool>"?`).
+    - Verified against a live 0.159.2 capture: the message quotes the
+      tool's name even when the tool declares a title.
+    - When the tool name can't be read, only `server` entries match.
+  - `CodexApprovalOutcome` gains `MCPServer`, `MCPTool` and
+    `MCPAllowEntry` for the `agent.permission.resolved` payload.
+  - **No change for existing hosts:** with no entries every MCP tool call
+    is still approved as before. Opting in is per host. The fail-closed
+    default was weighed and not taken; the PR gives the reasons.
+
 ## v0.15.0 — 2026-10-01
 
 MCP servers flow from the launch plan into every runtime's boot dir
