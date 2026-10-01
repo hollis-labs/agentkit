@@ -4,6 +4,20 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.1 — 2026-10-01
+
+Follow-up to v0.20.0 (CW-20261001-0160).
+
+### Fixed
+
+- **The jsonrpc-stdio session's own request ids start at 2^32**
+  (`callIDBase`). Hosts can drive Codex app-server with raw frames through
+  `SendInput`, numbered from 1, and the wrapper's Codex hosts do. Until
+  v0.20.0 the session made no requests of its own beside those frames.
+  `InterruptTurn`'s `turn/interrupt` is one, and with ids from 1 it could
+  reuse an id a host request still had in flight, so the two responses
+  would be confused. The Codex interrupt test checks the id it sends.
+
 ## v0.20.0 — 2026-10-01
 
 Turn interrupts for Codex app-server and OpenCode serve (CW-20261001-0160).
