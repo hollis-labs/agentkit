@@ -3,7 +3,6 @@
 package agentsessions
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -369,8 +368,8 @@ func (s *ptySession) spawnReaderLegacy(ptmx *os.File, ready chan<- struct{}) {
 	}()
 }
 
-// runReaderLoop is the body of the reader: scans ptmx, ticks activity per
-// line, fans bytes + parsed events out. Returns when the scanner sees EOF
+// runReaderLoop is the body of the reader: reads ptmx, ticks activity per
+// line, fans bytes + parsed events out. Returns when the reader sees EOF
 // (typically because the ptmx Close in the waiter / supervisor unblocks
 // it). Shared between the legacy waiter and the per-attempt supervised
 // reader.
@@ -380,17 +379,13 @@ func (s *ptySession) runReaderLoop(ptmx *os.File) {
 		sink = io.MultiWriter(s.logFile, s.opts.Fanout)
 	}
 
-	scanner := bufio.NewScanner(ptmx)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-
 	_, hasParser := s.adapter.(provider.EventParser)
 
-	for scanner.Scan() {
-		raw := scanner.Bytes()
+	// Read errors on PTY EOF (EIO) are expected and end the loop.
+	_ = readLines(ptmx, func(raw []byte) {
 		s.tickActivity()
-		// Copy the line because scanner.Bytes() reuses its buffer on the
-		// next Scan() call. Append a newline back so log readers see line
-		// boundaries.
+		// Copy the line because the reader reuses its buffer on the next
+		// line. Append a newline back so log readers see line boundaries.
 		line := make([]byte, len(raw)+1)
 		copy(line, raw)
 		line[len(raw)] = '\n'
@@ -423,8 +418,7 @@ func (s *ptySession) runReaderLoop(ptmx *os.File) {
 				s.opts.TypedEventCallback(te)
 			}
 		}
-	}
-	// Scanner errors on PTY EOF (EIO) are expected; ignored.
+	}, func(n int) { noteOversizeLine(s.logFile, "pty", s.runtime.cfg.ID, n) })
 }
 
 // spawnWaiterLegacy is the v0.5.0 waiter: blocks on cmd.Wait, nil-clears

@@ -4,7 +4,7 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v0.15.0 — 2026-10-01
+## v0.16.0 — 2026-10-01
 
 ### Security
 
@@ -37,6 +37,78 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **No change for existing hosts:** with no entries every MCP tool call
     is still approved as before. Opting in is per host. The fail-closed
     default was weighed and not taken; the PR gives the reasons.
+
+## v0.15.0 — 2026-10-01
+
+MCP servers flow from the launch plan into every runtime's boot dir
+(CW-20260930-0136, W4a, W4c and item 1). Requires go-providers v0.36.0.
+
+### Added
+
+- **`MCPServerSpec.URL`**: a streamable-HTTP MCP server, beside the stdio
+  `Command`/`Args`/`Env`. Set exactly one; go-providers rejects neither or
+  both when it renders the plant.
+- `PreparedPlantContext.MCPServers`.
+
+### Changed
+
+- **The launcher carries `MCPSpec` into the plant.** `launcher.Prepare` copies
+  `MCPSpec.LoopbackURL` and `MCPSpec.Servers` into `PreparedPlantContext`,
+  where it set only `AgentName`. `providerplant.PlantContextFor` maps them
+  onto go-providers' `PlantContext` (`URL` → `HTTPURL`, env flattened and
+  sorted). The go-providers renderers then plant them, in each CLI's form,
+  into claude's `.mcp.json`, codex's `config.toml`, opencode's
+  `opencode.json` and antigravity's `.agents/plugins/tether/mcp_config.json`.
+  Apps no longer hand-set the plant's MCP fields or render MCP config
+  themselves.
+- A launch without `MCPSpec.Servers` plants byte-identical config.
+## v0.14.2 — 2026-10-01
+
+`ExtraArgs` no longer become prompt text (CW-20261001-0102). The same fix
+ships for the v0.12 line as v0.12.3.
+
+### Fixed
+
+- **Sessions: `StartOptions.ExtraArgs` precede `--`.** Since go-providers
+  v0.34.1 an adapter's argv with a prompt ends in `-- <prompt>`, as on
+  `claude -p`, `codex exec` and `opencode run` turns. Without a launch
+  template, a caller's `ExtraArgs`, and `AutoPlantBootDir`'s project-dir
+  argument (Claude's `--add-dir`), were appended after it, so the agent
+  received them as prompt text. They now go immediately before the first `--`.
+  An argv without a `--` is unchanged, and an `ExtraArgs` that carries its own
+  `--` is appended as before. The launch template path already placed them
+  correctly.
+
+### Tests
+
+- A regression guard: prepared launches keep `Provider.Flags` and
+  `Injection.Args` before `--`, both in the planted argv and in every
+  later turn's argv. agentkit v0.12.x got this wrong. v0.12.3 fixes it on
+  that line.
+
+## v0.14.1 — 2026-10-01
+
+A child output line over 1 MiB no longer stops a session (CW-20261001-0086).
+
+### Fixed
+
+- **Session readers survive long lines.** Every runtime (jsonrpc-stdio,
+  streaming-stdio, PTY, serve-http) read child stdout through a
+  `bufio.Scanner` with a 1 MiB cap. A longer line, such as a Codex
+  `item/completed` carrying a command's whole output or a Claude `tool_result`
+  carrying a file, ended the reader. Nothing drained stdout after that: the
+  child blocked on the full pipe while the session still reported alive, and
+  every later `Call` waited out its deadline (torque#149's lost steering).
+  Lines up to 64 MiB are now routed whole. A longer line is read through,
+  skipped and noted in the process log and the session log, and reading
+  carries on.
+- **A reader failure is no longer silent.** When the jsonrpc-stdio or
+  streaming-stdio reader stops on a real read error (not EOF or a closed read
+  end), the session records the fault: `Health` reports it not alive, and
+  `Call` and `SendInput` fail at once with the reader's error. The pipe keeps
+  draining so the child cannot block. A jsonrpc `Call` made after the reader
+  has stopped also fails at once, instead of registering a response nobody
+  will read.
 
 ## v0.14.0 — 2026-10-01
 

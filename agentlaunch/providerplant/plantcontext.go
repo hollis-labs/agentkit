@@ -30,6 +30,8 @@ import (
 //     from the map form to the "KEY=VALUE" slice form
 //     provider.PlantContext uses, sorted by key for deterministic
 //     planted output
+//   - MCPServers     ← PreparedPlantContext.MCPServers: URL becomes
+//     HTTPURL, Env is flattened and sorted like MuxEnv
 //
 // PlantContextFor is exported so the sessionshim package can build the
 // same context for StartOptions.PlantContext without duplicating the
@@ -48,6 +50,7 @@ func PlantContextFor(prepared *agentlaunch.PreparedLaunch) provider.PlantContext
 		MuxCommand:     prepared.PlantContext.SelfMCPCommand,
 		MuxArgs:        prepared.PlantContext.SelfMCPArgs,
 		MuxEnv:         muxEnvKV(prepared.PlantContext.SelfMCPEnv),
+		MCPServers:     mcpServers(prepared.PlantContext.MCPServers),
 	}
 	if pc.BootContent == "" {
 		pc.BootContent = pc.SystemPrompt
@@ -70,6 +73,27 @@ func muxEnvKV(env map[string]string) []string {
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, k+"="+env[k])
+	}
+	return out
+}
+
+// mcpServers converts the launch's MCP servers into the go-providers form.
+// Nil/empty in → nil out, so a launch without servers plants byte-identical
+// config. Validation (one transport, valid unique names) is go-providers'
+// and fails the render.
+func mcpServers(in []agentlaunch.MCPServerSpec) []provider.MCPServerSpec {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]provider.MCPServerSpec, 0, len(in))
+	for _, s := range in {
+		out = append(out, provider.MCPServerSpec{
+			Name:    s.Name,
+			HTTPURL: s.URL,
+			Command: s.Command,
+			Args:    append([]string(nil), s.Args...),
+			Env:     muxEnvKV(s.Env),
+		})
 	}
 	return out
 }

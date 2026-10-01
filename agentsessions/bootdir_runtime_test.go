@@ -174,11 +174,16 @@ func TestAutoPlantBootDir_Runtime_ChildSeesPlantedEnv(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 	// Script that writes its PLANTED_BOOT env to a sidecar file then
-	// reads stdin until EOF — exercises EnvAmendments threading.
+	// reads stdin until EOF — exercises EnvAmendments threading. The
+	// witness is written to a temp name and renamed into place: the shell
+	// creates a redirect's target before printf fills it, so polling for
+	// the final name could otherwise read it empty (CW-20261001-0107).
+	// rename(2) makes it appear only once complete.
 	witnessPath := filepath.Join(workspace, "witness")
 	script := filepath.Join(root, "env-witness.sh")
 	body := `#!/bin/sh
-printf '%s' "$PLANTED_BOOT" > "` + witnessPath + `"
+printf '%s' "$PLANTED_BOOT" > "` + witnessPath + `.tmp"
+mv "` + witnessPath + `.tmp" "` + witnessPath + `"
 while IFS= read -r _; do :; done
 exit 0
 `
