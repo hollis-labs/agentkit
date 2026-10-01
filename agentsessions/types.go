@@ -408,6 +408,29 @@ type StartOptions struct {
 	// way. Set it per platform if you want best-effort behavior.
 	DenyGUILaunch bool
 
+	// ProtectedPaths lists control-plane paths the agent must never write:
+	// the host's state directories, database, config, catalog or
+	// allow-lists, which an agent running as the operator's uid could
+	// otherwise rewrite to grant itself authority (CW-20260930-0237). Each
+	// must be absolute. They are merged into the effective sandbox the way
+	// DenyGUILaunch is: onto SandboxPolicy or Profile.FS.Protect when one is
+	// set, and otherwise (including a disabled SandboxPolicy) as a minimal
+	// host-filesystem profile whose only effect is the protection. A
+	// protected path stays readable where the sandbox lets the agent read,
+	// and protection grants nothing. Where the platform cannot enforce it the
+	// launch fails with ErrProtectedPathsUnsupported instead of running
+	// unprotected, and provider-native runtimes reject it the same way.
+	// Register state directories, by their real path, that exist before
+	// launch. go-sandbox refuses a file (its directory stays writable, so an
+	// atomic save or a database sidecar defeats it), a path through a
+	// symlink the agent could re-point, and, on Linux, a missing path the
+	// agent could create. A read-only path does not stop connect(2) on a Unix
+	// socket; hide a control socket with a sandbox Deny instead. Protection
+	// stops direct writes; under the minimal host-filesystem profile it is not
+	// a boundary against writes delegated to same-uid services (see
+	// go-sandbox's README).
+	ProtectedPaths []string
+
 	// EndTurnOnAuthFailure ends a subprocess-per-turn turn as soon as the
 	// adapter's AuthFailureClassifier recognizes a login failure on stderr,
 	// instead of waiting for the CLI to give up (agy waits 60s for a browser
