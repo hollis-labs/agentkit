@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // harnessRenderer is a test ContractRenderer standing in for a
@@ -129,7 +131,7 @@ func harnessSpec(provider string) *BootSpec {
 				Object:  ContractObject{Kind: ContractObjectLiteral, Text: "RAW OVERLAY"},
 			},
 		},
-		Runtime: RuntimeBinding{Provider: provider, RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: provider, RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 }
 
@@ -152,7 +154,10 @@ func TestPopulateShapesContractObjectsPerHarness(t *testing.T) {
 	}{
 		{"claude", ".claude/skills/code-review/SKILL.md"},
 		{"opencode", "skills/code-review/SKILL.md"},
-		{"codex", "skills/code-review.md"},
+		// The directory form Codex reads under $CODEX_HOME (layout probe
+		// X2); the old flat skills/<name>.md was never read.
+		{"codex", "skills/code-review/SKILL.md"},
+		{"antigravity", ".agents/skills/code-review/SKILL.md"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.provider, func(t *testing.T) {
@@ -459,7 +464,7 @@ func TestMaterializePathSafety(t *testing.T) {
 			RelPath: "../../etc/passwd",
 			Object:  ContractObject{Kind: ContractObjectLiteral, Text: "pwned"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	// The unsafe RelPath is caught at BootSpec.Validate time.
 	_, err := m.Populate(context.Background(), bootDir,
@@ -484,7 +489,7 @@ func TestMaterializeRawInjectionPathSafety(t *testing.T) {
 			RelPath: "../escape.txt",
 			Object:  ContractObject{Kind: ContractObjectLiteral, Text: "x"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	_, err := m.Populate(context.Background(), t.TempDir(),
 		MaterializeRequest{Spec: spec}, nil)
@@ -505,7 +510,7 @@ func TestRenderObjectKinds(t *testing.T) {
 			ID: "f", RelPath: "f.txt",
 			Object: ContractObject{Kind: ContractObjectInput, Ref: "nope"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	if _, err := m.Populate(context.Background(), bootDir,
 		MaterializeRequest{Spec: badInput}, nil); !errors.Is(err, ErrMaterializeUnknownInput) {
@@ -518,7 +523,7 @@ func TestRenderObjectKinds(t *testing.T) {
 			ID: "f", RelPath: "f.txt",
 			Object: ContractObject{Kind: ContractObjectVar, Ref: "nope"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	if _, err := m.Populate(context.Background(), bootDir,
 		MaterializeRequest{Spec: badVar}, nil); !errors.Is(err, ErrMaterializeUnknownVar) {
@@ -535,7 +540,7 @@ func TestSlotWithoutRendererErrors(t *testing.T) {
 			ID: "s", RelPath: "s.md",
 			Object: ContractObject{Kind: ContractObjectSlot, Ref: "slot-x"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	_, err := m.Populate(context.Background(), t.TempDir(),
 		MaterializeRequest{Spec: spec}, nil)
@@ -552,7 +557,7 @@ func TestSlotRendererErrorPropagates(t *testing.T) {
 			ID: "s", RelPath: "s.md",
 			Object: ContractObject{Kind: ContractObjectSlot, Ref: "slot-x"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	_, err := m.Populate(context.Background(), t.TempDir(),
 		MaterializeRequest{Spec: spec}, errRenderer{})
@@ -584,7 +589,7 @@ func TestFileModeReconciled(t *testing.T) {
 			ID: "exec", RelPath: "run.sh", Mode: 0o755,
 			Object: ContractObject{Kind: ContractObjectLiteral, Text: "#!/bin/sh\n"},
 		}},
-		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: RuntimeSubprocess},
+		Runtime: RuntimeBinding{Provider: "claude", RuntimeKind: runtimes.ModeSubprocessPerTurn},
 	}
 	if _, err := m.Populate(context.Background(), bootDir,
 		MaterializeRequest{Spec: spec}, nil); err != nil {

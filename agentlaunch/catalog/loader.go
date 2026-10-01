@@ -29,8 +29,8 @@ var (
 	ErrProviderNotFound = errors.New("agentlaunch/catalog: provider id not found")
 
 	// ErrUnsupportedRuntime is returned when a provider declares a
-	// runtime_kind value that does not map cleanly onto an
-	// agentlaunch.RuntimeKind. The original value is captured in the
+	// runtime_kind value that does not map cleanly onto a
+	// runtimes.Mode. The original value is captured in the
 	// wrapped error and in the launch plan's annotations.
 	ErrUnsupportedRuntime = errors.New("agentlaunch/catalog: unsupported runtime kind")
 

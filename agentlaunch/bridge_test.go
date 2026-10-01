@@ -1,6 +1,10 @@
 package agentlaunch
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+)
 
 // validBridgeInput returns a PlanFromLaunchInput that PlanFromLaunch accepts —
 // each test mutates one field to exercise a specific path.
@@ -20,7 +24,7 @@ func validBridgeInput() PlanFromLaunchInput {
 		Runtime: RuntimeBinding{
 			Provider:    "codex",
 			Model:       "gpt-5.4",
-			RuntimeKind: RuntimeSubprocess,
+			RuntimeKind: runtimes.ModeSubprocessPerTurn,
 			Args:        []string{"--flag"},
 			Timeout:     "3h",
 			Permission:  "on-request",
@@ -57,7 +61,7 @@ func TestPlanFromLaunch(t *testing.T) {
 	if plan.Provider.Permission != "on-request" {
 		t.Errorf("Provider.Permission = %q, want on-request (carried from RuntimeBinding.Permission)", plan.Provider.Permission)
 	}
-	if plan.Runtime != RuntimeSubprocess {
+	if plan.Runtime != runtimes.ModeSubprocessPerTurn {
 		t.Errorf("Runtime = %q, want subprocess", plan.Runtime)
 	}
 	if plan.Workspace.Mode != WorkspacePersistent {

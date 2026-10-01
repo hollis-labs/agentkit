@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 	"github.com/hollis-labs/go-materialize/artifact"
@@ -16,7 +17,7 @@ func TestPlant_RepeatedCallsStableAndPreserveSpacePaths(t *testing.T) {
 	isolateHome(t)
 	projectRoot := t.TempDir() + "/Project With Spaces"
 	workspaceRoot := t.TempDir() + "/Workspace With Spaces"
-	compiled := compiledFor(t, "codex", agentlaunch.RuntimeSubprocess)
+	compiled := compiledFor(t, "codex", runtimes.ModeSubprocessPerTurn)
 	compiled.Plan.Project.Root = projectRoot
 	compiled.Plan.Workspace.WorkspaceDir = workspaceRoot
 	compiled.Plan.Workspace.Workdir = projectRoot
@@ -55,7 +56,7 @@ func TestPlant_RepeatedCallsStableAndPreserveSpacePaths(t *testing.T) {
 
 func TestPrepareExecution_CarriesProviderEffectsDiagnosticsAndMaterialization(t *testing.T) {
 	isolateHome(t)
-	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, "codex", agentlaunch.RuntimeSubprocess))
+	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, "codex", runtimes.ModeSubprocessPerTurn))
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}

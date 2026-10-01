@@ -24,8 +24,16 @@ var (
 	// plant.
 	ErrNoBootDirSpec = errors.New("agentlaunch/providerplant: adapter does not provide a BootDirSpec")
 
-	// ErrUnknownRenderer is returned by the default resolver when the
-	// matrix descriptor names a BootDirRenderer this package has no
-	// adapter for.
-	ErrUnknownRenderer = errors.New("agentlaunch/providerplant: unknown bootdir renderer")
+	// ErrPositionalAfterProjection is returned when the first of the
+	// plan's Provider.Flags and Injection.Args is not an option. They are
+	// appended after the projected argv, which can end in a variadic flag
+	// (Claude's --add-dir) that would swallow the positional.
+	ErrPositionalAfterProjection = errors.New("agentlaunch/providerplant: a positional argument would follow the projected argv")
+
+	// ErrNoNativeAdapter is returned by the default resolver when the
+	// launch's runtime has no boot dir to plant (an ACP-only runtime, such
+	// as Copilot or Pi, has no layout) or no go-providers adapter this
+	// package builds. A caller with its own adapter passes WithAdapter or
+	// WithResolver.
+	ErrNoNativeAdapter = errors.New("agentlaunch/providerplant: no native adapter for the runtime")
 )

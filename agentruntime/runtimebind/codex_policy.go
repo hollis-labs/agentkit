@@ -1,12 +1,11 @@
 package runtimebind
 
 import (
-	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 type CodexPolicyRequest struct {
-	Runtime       agentlaunch.RuntimeKind
+	Runtime       runtimes.Mode
 	Bypass        bool
 	Approval      string
 	Sandbox       string
@@ -33,7 +32,7 @@ func ResolveCodexPolicy(req CodexPolicyRequest) CodexPolicy {
 	if sandbox == "" {
 		sandbox = "workspace-write"
 	}
-	if req.Bypass && runtimekind.Parse(string(req.Runtime)) == runtimekind.JSONRPCStdio {
+	if req.Bypass && req.Runtime == runtimes.ModeJSONRPCStdio {
 		sandbox = "danger-full-access"
 	}
 	return CodexPolicy{

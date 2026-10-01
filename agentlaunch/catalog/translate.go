@@ -3,6 +3,7 @@ package catalog
 import (
 	"fmt"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 )
 
@@ -345,28 +346,29 @@ func mapWorkspaceMode(s string) agentlaunch.WorkspaceMode {
 	}
 }
 
-// mapRuntimeKind converts Tether's runtime_kind tokens to
-// agentlaunch.RuntimeKind. Returns (token, true) on a clean mapping,
-// (zero, false) when the token is unrecognised.
+// mapRuntimeKind converts a Tether catalog runtime_kind token to a
+// runtimes.Mode. The catalog is Tether's on-disk format, so this is the
+// boundary where its own spellings are translated: "subprocess" is
+// subprocess-per-turn and "serve-http" is http-sse. A canonical
+// runtimes.Mode spelling passes through unchanged. Returns (zero, false) for
+// anything else.
 //
-// Tether's "api" runtime is intentionally NOT mapped: agentlaunch does
-// not model in-process API runtimes today, and the matrix sibling
-// (CW-0004) would reject the (provider, api) pair. Callers that load
-// a catalog containing api-typed providers can use those entries for
-// metadata but cannot Resolve a launch that depends on them.
-func mapRuntimeKind(s string) (agentlaunch.RuntimeKind, bool) {
+// Tether's "api" runtime is intentionally NOT mapped: it is a direct
+// provider API, not a CLI runtime mode, and the registry has no runtime to
+// pair it with. Callers that load a catalog containing api-typed providers
+// can use those entries for metadata but cannot Resolve a launch that
+// depends on them.
+func mapRuntimeKind(s string) (runtimes.Mode, bool) {
 	switch s {
 	case "subprocess":
-		return agentlaunch.RuntimeSubprocess, true
-	case "pty":
-		return agentlaunch.RuntimePTY, true
-	case "streaming-stdio":
-		return agentlaunch.RuntimeStreamingStdio, true
-	case "jsonrpc-stdio":
-		return agentlaunch.RuntimeJsonRpcStdio, true
-	default:
-		return "", false
+		return runtimes.ModeSubprocessPerTurn, true
+	case "serve-http":
+		return runtimes.ModeHTTPSSE, true
 	}
+	if m := runtimes.Mode(s); m.Valid() {
+		return m, true
+	}
+	return "", false
 }
 
 // mapLaunchMode converts the LaunchProfile.Mode string into an

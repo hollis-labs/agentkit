@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentcontext"
 	"github.com/hollis-labs/agentkit/agentcontext/resolvers"
 
@@ -56,7 +57,7 @@ Skill body.
 			ID:    "claude",
 			Flags: []string{"--quiet"},
 		},
-		Runtime: agentlaunch.RuntimePTY,
+		Runtime: runtimes.ModePTY,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:       agentlaunch.WorkspaceTemp,
 			TempPrefix: tempPrefix,

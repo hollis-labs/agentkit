@@ -3,6 +3,8 @@ package agentlaunch
 import (
 	"errors"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 func TestNativeFileValidate(t *testing.T) {
@@ -63,7 +65,7 @@ func TestLaunchPlanValidateNativeFiles(t *testing.T) {
 		Project:   ProjectSpec{ID: "p"},
 		Agent:     AgentSpec{ID: "a"},
 		Provider:  ProviderSpec{ID: "claude"},
-		Runtime:   RuntimePTY,
+		Runtime:   runtimes.ModePTY,
 		Workspace: WorkspaceSpec{Mode: WorkspaceTemp},
 		BootProfile: BootProfileRef{
 			Inline: &BootProfileInline{BootMode: BootModePlanted},

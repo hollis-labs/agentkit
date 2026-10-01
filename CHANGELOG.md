@@ -4,6 +4,77 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.12.0 — 2026-10-01
+
+Minor, breaking (pre-1.0). Pairs with go-providers v0.31.0 and adds a
+dependency on agent-contracts-leaf v0.3.0. agentkit now reads its runtimes
+from the go-providers registry (CW-20260930-0133, EP-20260930-0001): a runtime
+added there resolves and launches here with no agentkit edit.
+
+### Changed
+
+- **Breaking:** `agentlaunch.RuntimeKind` and its constants are gone; every
+  runtime field is an agent-contracts-leaf `runtimes.Mode` (D-73, no aliases
+  per D-22). `LaunchPlan.Runtime`, `RuntimeBinding.RuntimeKind` (field and
+  `runtime_kind` key kept), `PreparedExecution`, `ProviderProjection`,
+  `CapabilityDiagnostic`, `turn.Options.Runtime`, `bootdir` and
+  `runtimebind` carry the leaf spellings: `subprocess` is
+  `subprocess-per-turn`, `serve-http` is `http-sse`, and ACP is a mode
+  (`acp-stdio`, `acp-tcp`) rather than a side path.
+- **Breaking:** `runtimebind` resolves through the registry.
+  - Ids and aliases come from the registry. The `claude*`/`antigravity*`
+    prefix matching is gone; `claude-code` and `agy` are registry aliases.
+  - The default mode is the descriptor's. **Codex now defaults to
+    `jsonrpc-stdio` (app-server)**, matching go-agent-wrapper (D-74); it
+    was `subprocess`. The debug posture still prefers a runtime's PTY.
+  - Supported modes come from the registry.
+  - An API provider is a `Binding` with `API: true` and no mode, not a
+    runtime kind.
+  - `Request.Overrides` is keyed by `runtimes.ID`.
+- **Breaking:** `matrix` holds no table. `Lookup`, `IsSupported`,
+  `Supported` and `KnownProviders` read the registry. `Descriptor` carries
+  `ProviderID runtimes.ID`, `Runtime runtimes.Mode`, `BinaryName` and the
+  full `registry.Descriptor`.
+- `launcher.Compile`'s `BootDirIntent` is read from the go-providers layout
+  table (instructions, boot and MCP rows), so it names what the harness
+  reads, as its doc always said. Old values: claude `agentrc.yaml`, codex
+  `config.toml`, opencode `OPENCODE.md` transient. New values: `CLAUDE.md`,
+  `AGENTS.md`, `agents/<agent>.md`, each with `boot.md`. An ACP-only
+  runtime's intent is empty.
+- Skills planted through `NativeFile`/`BootInjectionSpec` use the layout's
+  skills root in the directory form everywhere. Codex moves from the flat
+  `skills/<name>.md`, which Codex never read, to `skills/<name>/SKILL.md`.
+- The projection bridge classifies effects with go-providers'
+  `ProviderEffectKind.Class`/`Secret`; an unknown effect kind is now
+  redacted. Artifact group ids carry the launch shape including its variant
+  (`provider:claude:subprocess-per-turn+bare`), so Claude print and bare
+  launches no longer share a group.
+- providerplant no longer patches `--add-dir <project>` into the projected
+  argv: go-providers v0.31.0's Claude convention carries it in every mode.
+
+### Added
+
+- `agentlaunch.SkillRelPath(provider, mode, name)`, the one skill-path
+  helper, and `agentlaunch.ErrNoSkillRoot`.
+- `providerplant.ErrPositionalAfterProjection`: the first of
+  `Provider.Flags`/`Injection.Args` must be an option. They follow the
+  projected argv, whose last flag can be variadic (Claude's `--add-dir`,
+  `--mcp-config`) and would swallow a positional.
+- `providerplant.ErrNoNativeAdapter`: `DefaultResolver` for an ACP-only
+  runtime (Copilot, Pi) or one it builds no adapter for.
+
+### Removed
+
+- **Breaking:**
+  - package `agentruntime/runtimekind`. Its `Parse` aliases, `API`,
+    `PTYDebug` and `Unknown` have no replacement: a host normalizes its own
+    tokens at its boundary, `pty-debug` is `pty` plus the debug posture, and
+    API is `runtimebind.Binding.API`;
+  - `matrix.Capabilities`, `matrix.BootDirRenderer`, the `matrix.Provider*`
+    constants and `matrix.KnownRuntimes`;
+  - providerplant's `ErrUnknownRenderer`, both `skillRelPath` copies and
+    `appendMissingProjectArg`.
+
 ## v0.11.0 — 2026-10-01
 
 Minor, additive. No existing API changes; adds a dependency on go-permission

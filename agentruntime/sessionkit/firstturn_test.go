@@ -3,7 +3,7 @@ package sessionkit
 import (
 	"testing"
 
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentruntime/turn"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
@@ -23,7 +23,7 @@ func TestFirstTurnPolicyFramesAutoFire(t *testing.T) {
 	if err := ApplyFirstTurnPolicy(&opts, FirstTurnPolicy{
 		Mode:   AutoFireFirstTurn,
 		Prompt: "hello",
-		Turn:   turn.Options{Runtime: runtimekind.StreamingStdio},
+		Turn:   turn.Options{Runtime: runtimes.ModeStreamingStdio},
 	}); err != nil {
 		t.Fatal(err)
 	}

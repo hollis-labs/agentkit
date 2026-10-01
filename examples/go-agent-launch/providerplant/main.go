@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 	"github.com/hollis-labs/agentkit/agentlaunch/providerplant"
@@ -64,7 +65,7 @@ func run() error {
 		Project:  agentlaunch.ProjectSpec{ID: "example", Name: "Example", Root: projectRoot},
 		Agent:    agentlaunch.AgentSpec{ID: "demo-agent", Name: "demo-agent"},
 		Provider: agentlaunch.ProviderSpec{ID: "opencode"},
-		Runtime:  agentlaunch.RuntimeSubprocess,
+		Runtime:  runtimes.ModeSubprocessPerTurn,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:       agentlaunch.WorkspaceTemp,
 			TempPrefix: tempPrefix,

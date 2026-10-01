@@ -15,8 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
-	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 )
 
@@ -30,7 +29,7 @@ var (
 
 type Options struct {
 	Provider string
-	Runtime  agentlaunch.RuntimeKind
+	Runtime  runtimes.Mode
 	// JSONRPCMethod is a provider-specific wire detail. Public callers should
 	// prefer SendTurn and let the provider binding/adapter choose the real
 	// JSON-RPC method. Tests and custom adapters can override it here.
@@ -48,14 +47,12 @@ type JSONRPCSender interface {
 // Frame returns the payload for raw SendInput. JSON-RPC stdio callers should
 // prefer SendTurn so typed calls do not go through the raw byte escape hatch.
 func Frame(text string, opts Options) ([]byte, error) {
-	switch runtimekind.Parse(string(opts.Runtime)) {
-	case runtimekind.StreamingStdio:
+	switch opts.Runtime {
+	case runtimes.ModeStreamingStdio:
 		return ClaudeStreamingUserFrame(text)
-	case runtimekind.Subprocess, runtimekind.ServeHTTP, runtimekind.PTY, runtimekind.PTYDebug:
+	case runtimes.ModeSubprocessPerTurn, runtimes.ModeHTTPSSE, runtimes.ModePTY:
 		return []byte(text), nil
-	case runtimekind.API:
-		return []byte(text), nil
-	case runtimekind.JSONRPCStdio:
+	case runtimes.ModeJSONRPCStdio:
 		params := map[string]any{"message": text}
 		return json.Marshal(map[string]any{"method": method(opts), "params": params})
 	default:
@@ -70,7 +67,7 @@ func Frame(text string, opts Options) ([]byte, error) {
 // CodexAppServerCache so the initialize/thread-binding protocol and cached
 // thread id are shared.
 func SendTurn(ctx context.Context, sender Sender, text string, opts Options) error {
-	if runtimekind.Parse(string(opts.Runtime)) == runtimekind.JSONRPCStdio {
+	if opts.Runtime == runtimes.ModeJSONRPCStdio {
 		if rpc, ok := sender.(JSONRPCSender); ok {
 			_, err := rpc.Call(ctx, method(opts), map[string]any{"message": text})
 			return err

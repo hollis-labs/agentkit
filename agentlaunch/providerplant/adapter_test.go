@@ -5,14 +5,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/provider"
 
-	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 )
 
 func TestDefaultResolver_Claude(t *testing.T) {
-	a, err := DefaultResolver(compiledFor(t, "claude", agentlaunch.RuntimePTY))
+	a, err := DefaultResolver(compiledFor(t, "claude", runtimes.ModePTY))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestDefaultResolver_Claude(t *testing.T) {
 // makes the planted boot dir carry the non-interactive approval contract.
 func TestDefaultResolver_PermissionThreading(t *testing.T) {
 	// claude: Provider.Permission → ClaudeAdapter.PermissionMode.
-	cc := compiledFor(t, "claude", agentlaunch.RuntimePTY)
+	cc := compiledFor(t, "claude", runtimes.ModePTY)
 	cc.Plan.Provider.Permission = "acceptEdits"
 	a, err := DefaultResolver(cc)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestDefaultResolver_PermissionThreading(t *testing.T) {
 	}
 
 	// codex: Provider.Permission → CodexAdapter.ApprovalPolicy.
-	cx := compiledFor(t, "codex", agentlaunch.RuntimeSubprocess)
+	cx := compiledFor(t, "codex", runtimes.ModeSubprocessPerTurn)
 	cx.Plan.Provider.Permission = "on-request"
 	c, err := DefaultResolver(cx)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestDefaultResolver_PermissionThreading(t *testing.T) {
 
 	// Empty Permission → the adapter field stays empty (claude: the caller
 	// must set it; codex: go-providers defaults ApprovalPolicy to "never").
-	empty, err := DefaultResolver(compiledFor(t, "claude", agentlaunch.RuntimePTY))
+	empty, err := DefaultResolver(compiledFor(t, "claude", runtimes.ModePTY))
 	if err != nil {
 		t.Fatalf("resolve claude (empty permission): %v", err)
 	}
@@ -67,7 +67,7 @@ func TestDefaultResolver_PermissionThreading(t *testing.T) {
 }
 
 func TestDefaultResolver_CodexExecVsAppServer(t *testing.T) {
-	exec, err := DefaultResolver(compiledFor(t, "codex", agentlaunch.RuntimeSubprocess))
+	exec, err := DefaultResolver(compiledFor(t, "codex", runtimes.ModeSubprocessPerTurn))
 	if err != nil {
 		t.Fatalf("resolve exec: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestDefaultResolver_CodexExecVsAppServer(t *testing.T) {
 		t.Errorf("subprocess runtime: got %T mode=%q, want exec-mode CodexAdapter", exec, modeOf(exec))
 	}
 
-	app, err := DefaultResolver(compiledFor(t, "codex", agentlaunch.RuntimeJsonRpcStdio))
+	app, err := DefaultResolver(compiledFor(t, "codex", runtimes.ModeJSONRPCStdio))
 	if err != nil {
 		t.Fatalf("resolve app-server: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestDefaultResolver_CodexExecVsAppServer(t *testing.T) {
 }
 
 func TestDefaultResolver_Opencode(t *testing.T) {
-	a, err := DefaultResolver(compiledFor(t, "opencode", agentlaunch.RuntimeSubprocess))
+	a, err := DefaultResolver(compiledFor(t, "opencode", runtimes.ModeSubprocessPerTurn))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -95,6 +95,16 @@ func TestDefaultResolver_Opencode(t *testing.T) {
 	}
 	if oc.Agent != "agent-name" {
 		t.Errorf("OpencodeAdapter.Agent = %q, want agent-name (from AgentSpec.Name)", oc.Agent)
+	}
+}
+
+// An ACP-only runtime (no layout, no boot dir) has no native adapter to
+// plant; the resolver says so instead of guessing.
+func TestDefaultResolver_ACPOnlyHasNoNativeAdapter(t *testing.T) {
+	for _, id := range []string{"copilot", "pi"} {
+		if _, err := DefaultResolver(compiledFor(t, id, runtimes.ModeACPStdio)); !errors.Is(err, ErrNoNativeAdapter) {
+			t.Errorf("%s: err = %v, want ErrNoNativeAdapter", id, err)
+		}
 	}
 }
 
@@ -108,7 +118,7 @@ func TestDefaultResolver_NilCompiled(t *testing.T) {
 // lookup — here a plain codex adapter planted for a claude launch.
 func TestPlant_WithAdapterOverride(t *testing.T) {
 	isolateHome(t)
-	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, "claude", agentlaunch.RuntimePTY))
+	prepared, err := launcher.Prepare(context.Background(), compiledFor(t, "claude", runtimes.ModePTY))
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}

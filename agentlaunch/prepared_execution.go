@@ -3,6 +3,7 @@ package agentlaunch
 import (
 	"errors"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentcontext"
 	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/go-materialize/materialize"
@@ -81,7 +82,7 @@ func (r PrepareRequest) Validate() error {
 
 type ProviderProjection struct {
 	Provider    string                 `yaml:"provider,omitempty" json:"provider,omitempty"`
-	Runtime     RuntimeKind            `yaml:"runtime,omitempty" json:"runtime,omitempty"`
+	Runtime     runtimes.Mode          `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	Artifacts   artifact.Tree          `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
 	Bindings    ExecutionBindings      `yaml:"bindings,omitempty" json:"bindings,omitempty"`
 	Effects     []RuntimeEffect        `yaml:"effects,omitempty" json:"effects,omitempty"`
@@ -237,7 +238,7 @@ type CapabilityDiagnostic struct {
 	Outcome  EnforcementOutcomeKind `yaml:"outcome,omitempty" json:"outcome,omitempty"`
 	Feature  string                 `yaml:"feature,omitempty" json:"feature,omitempty"`
 	Provider string                 `yaml:"provider,omitempty" json:"provider,omitempty"`
-	Runtime  RuntimeKind            `yaml:"runtime,omitempty" json:"runtime,omitempty"`
+	Runtime  runtimes.Mode          `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 }
 
 type LegacyCompatibility struct {

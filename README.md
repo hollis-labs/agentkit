@@ -33,7 +33,8 @@ excluded (see the migration map).
     Auto-plant bootdir helpers. Compliance subpackage for parity tests.
 - `github.com/hollis-labs/agentkit/agentruntime`
   - Runtime helpers: turn, checkpoint, bootdir, loopback, runtimebind,
-    runtimekind, sessionkit, smoke.
+    sessionkit, smoke. Runtime ids, modes and per-runtime facts come from
+    agent-contracts-leaf `runtimes` and the go-providers `registry`.
 - `github.com/hollis-labs/agentkit/broker`
   - Envelope/messaging harness used by agent runtimes for inter-component
     coordination.

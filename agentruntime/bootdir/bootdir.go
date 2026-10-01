@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	agentlaunch "github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/go-materialize/materialize"
@@ -77,7 +78,7 @@ type WriteOptions struct {
 
 type Request struct {
 	Provider    string
-	Runtime     agentlaunch.RuntimeKind
+	Runtime     runtimes.Mode
 	NativeFiles []agentlaunch.NativeFile
 	Overlays    map[string]string
 }

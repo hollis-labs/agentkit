@@ -1,6 +1,7 @@
 package agentlaunch
 
 import (
+	"github.com/hollis-labs/go-providers/layout"
 	"github.com/hollis-labs/go-providers/provider"
 
 	"github.com/hollis-labs/go-materialize/artifact"
@@ -11,7 +12,7 @@ import (
 func ProviderProjectionFromProvider(in provider.ProviderProjection) ProviderProjection {
 	out := ProviderProjection{
 		Provider:    string(in.Provider),
-		Runtime:     runtimeKindForProviderMode(in.Mode),
+		Runtime:     in.Mode,
 		Artifacts:   artifact.Tree{Entries: make([]artifact.Entry, 0, len(in.Files))},
 		Effects:     make([]RuntimeEffect, 0, len(in.Effects)),
 		Diagnostics: make([]CapabilityDiagnostic, 0, len(in.Diagnostics)),
@@ -32,19 +33,19 @@ func ProviderProjectionFromProvider(in provider.ProviderProjection) ProviderProj
 			Bytes: content,
 			Ownership: artifact.Ownership{
 				EntryID: "provider:" + string(in.Provider) + ":" + f.RelPath,
-				GroupID: "provider:" + string(in.Provider) + ":" + string(in.Mode),
+				GroupID: "provider:" + string(in.Provider) + ":" + layout.Shape{Mode: in.Mode, Variant: in.Variant}.String(),
 			},
 			Provenance: artifact.Provenance{Source: "go-providers", SourcePath: f.Role, Revision: in.Version},
 		})
 	}
 	for _, e := range in.Effects {
 		out.Effects = append(out.Effects, RuntimeEffect{
-			Kind:           runtimeEffectKind(e.Kind),
+			Kind:           runtimeEffectKind(e.Kind.Class()),
 			Name:           string(e.Kind),
 			ProviderEffect: string(e.Kind),
 			Destination:    e.Destination,
 			Required:       false,
-			Redacted:       providerEffectIsSecret(e.Kind),
+			Redacted:       e.Kind.Secret(),
 			Owner:          string(in.Provider),
 			Diagnostic:     e.Reason,
 		})
@@ -56,7 +57,7 @@ func ProviderProjectionFromProvider(in provider.ProviderProjection) ProviderProj
 			Message:  d.Message,
 			Feature:  string(d.Feature),
 			Provider: string(in.Provider),
-			Runtime:  runtimeKindForProviderMode(in.Mode),
+			Runtime:  in.Mode,
 		})
 	}
 	if normalized, err := artifact.Normalize(out.Artifacts.Entries); err == nil {
@@ -65,39 +66,12 @@ func ProviderProjectionFromProvider(in provider.ProviderProjection) ProviderProj
 	return out
 }
 
-func runtimeKindForProviderMode(mode provider.ProviderMode) RuntimeKind {
-	switch mode {
-	case provider.ModeClaudePTY:
-		return RuntimePTY
-	case provider.ModeClaudeStreamingStdio:
-		return RuntimeStreamingStdio
-	case provider.ModeCodexAppServer:
-		return RuntimeJsonRpcStdio
-	case provider.ModeOpencodeServeHTTP:
-		return RuntimeServeHTTP
-	default:
-		return RuntimeSubprocess
-	}
-}
-
-func runtimeEffectKind(kind provider.ProviderEffectKind) RuntimeEffectKind {
-	switch kind {
-	case provider.EffectCodexAuthJSON, provider.EffectOpencodeProviderAuth, provider.EffectAntigravityAuth:
-		return RuntimeEffectCredential
-	case provider.EffectClaudeWorkspaceTrust:
+// runtimeEffectKind maps go-providers' classification of an effect onto
+// agentkit's; go-providers owns which effect kind is which (and an unknown
+// kind there is a credential).
+func runtimeEffectKind(class provider.EffectClass) RuntimeEffectKind {
+	if class == provider.EffectClassHostConfig {
 		return RuntimeEffectHostConfig
-	case provider.EffectClaudeCredentialHelper:
-		return RuntimeEffectCredential
-	default:
-		return RuntimeEffectCredential
 	}
-}
-
-func providerEffectIsSecret(kind provider.ProviderEffectKind) bool {
-	switch kind {
-	case provider.EffectCodexAuthJSON, provider.EffectOpencodeProviderAuth:
-		return true
-	default:
-		return false
-	}
+	return RuntimeEffectCredential
 }
