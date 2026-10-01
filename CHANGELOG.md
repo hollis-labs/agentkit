@@ -4,6 +4,60 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.4 — 2026-10-01
+
+A coherent dependency refresh, and the fix that makes go-providers v0.41.0
+safe to pair with agentkit (CW-20261001-0194).
+
+### Fixed
+
+- **go-providers v0.41.0 with agentkit v0.20.3 or earlier breaks codex exec
+  turn 2 under `AutoPlantBootDir`.**
+  - go-providers v0.41.0 resumes a codex exec thread with
+    `exec … --cd <project> resume <id> -- <prompt>`, and agentkit passes
+    the session id back on every later turn.
+  - Auto-planting spliced codex's `--cd <project>` in through `ExtraArgs`,
+    just before "--", so turn 2 became
+    `exec … resume <id> --cd <project> -- <prompt>`.
+  - codex-cli 0.159.2 refuses that with `error: unexpected argument '--cd'
+    found`. Before go-providers v0.41.0, turn 2 started a new thread and
+    worked.
+  - Planting now gives a codex exec adapter the project in a per-session
+    clone's `ProjectDir`, as it already did for Claude's bare mode. go-providers
+    then places `--cd` in front of `resume`. Turn 1's argv is byte-identical.
+    With caller `ExtraArgs` present, `--cd` now precedes them instead of
+    following them.
+  - Tested by `TestAutoPlantedCodexExecResumesWithCdBeforeResume`: two
+    auto-planted codex exec turns on go-providers' captures. It checks
+    turn 2's argv against what codex accepts after `resume <id>`, which the
+    fake does not check. Without the fix it fails.
+
+### Changed
+
+- **Dependencies:**
+
+  | Module | From | To |
+  |---|---|---|
+  | go-providers | v0.40.0 | v0.41.0 (codex exec resume, `CodexAdapter.IsSessionLost`) |
+  | go-sandbox | v0.5.0 | v0.6.0 (`DenyUserServiceManager`, v0.5.1's host-filesystem argv[0] fix) |
+  | go-runner | v0.7.0 | v0.8.2 (resource-limit and long-line fixes) |
+  | go-llm-contracts | v0.3.0 | v0.4.0 (adds `contracttest`; root API unchanged) |
+
+  go-llm-types stays at v0.5.1, the latest.
+- **Codex exec sessions resume their thread from turn 2,** and report the
+  thread id as the provider session id. Before, each turn started a new
+  thread.
+
+### Documented
+
+- **`StartOptions.ExtraArgs` on a codex exec session without `Launch`** land
+  after `resume <id>` from turn 2 on, so they must be flags codex accepts
+  there: `-c`, `-m`, `--dangerously-bypass-approvals-and-sandbox`.
+  Exec-only flags (`-s`, `--cd`, `--add-dir`) belong in the
+  `CodexAdapter`'s own `ExtraArgs` or a `Launch` template. The test above
+  pins this ordering. CW-20261001-0197 tracks placing caller extras at the
+  convention's slot.
+
 ## v0.20.2 — 2026-10-01
 
 ### Fixed
