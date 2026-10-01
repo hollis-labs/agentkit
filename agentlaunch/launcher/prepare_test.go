@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 )
 
@@ -28,7 +29,7 @@ func validPlanForPrepare(t *testing.T) agentlaunch.LaunchPlan {
 				"BAZ": "providerbaz",
 			},
 		},
-		Runtime: agentlaunch.RuntimePTY,
+		Runtime: runtimes.ModePTY,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:       agentlaunch.WorkspaceTemp,
 			TempPrefix: tempPrefix,

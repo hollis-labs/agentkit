@@ -6,8 +6,8 @@ package agentlaunch
 // is optional and overrides defaults the adapter would otherwise pick.
 //
 // The library does NOT validate which provider IDs exist — that is the
-// catalog port's responsibility (CW-0003) at parse time, and the
-// matrix's responsibility (CW-0004) when pairing with RuntimeKind.
+// catalog port's responsibility at parse time, and the matrix's (which reads
+// the go-providers runtime registry) when pairing with a runtimes.Mode.
 // Validate only enforces non-empty ID.
 type ProviderSpec struct {
 	// ID is the provider's stable identifier (e.g. "claude", "codex",

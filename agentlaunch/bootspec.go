@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // RuntimeBinding is the frozen hot-path-readable runtime contract the
@@ -12,8 +14,8 @@ import (
 // pick a provider/model/runtime shape synchronously, without resolving
 // the richer BootSpec blueprint.
 //
-// RuntimeKind is canonical here: consumers should converge on
-// agentlaunch.RuntimeKind rather than carrying local runtime enums.
+// The runtime mode is the agent-contracts-leaf runtimes.Mode (D-73); there
+// is no agentkit runtime enum.
 type RuntimeBinding struct {
 	// Provider is the stable provider identifier (claude / codex /
 	// opencode / future). Required.
@@ -22,8 +24,10 @@ type RuntimeBinding struct {
 	// Model is the provider-defined model selector. Optional.
 	Model string `yaml:"model,omitempty" json:"model,omitempty"`
 
-	// RuntimeKind is the canonical shared runtime enum. Required.
-	RuntimeKind RuntimeKind `yaml:"runtime_kind" json:"runtime_kind"`
+	// RuntimeKind is the runtime mode (runtimes.Mode). The field and its
+	// YAML/JSON key keep their names; the values are runtimes.Mode
+	// spellings ("subprocess-per-turn", not "subprocess"). Required.
+	RuntimeKind runtimes.Mode `yaml:"runtime_kind" json:"runtime_kind"`
 
 	// Args is the provider/runtime argument vector overlay, excluding the
 	// binary path. Consumer overlays still win on conflict for
@@ -59,7 +63,7 @@ func (r RuntimeBinding) Validate() error {
 		return ErrRuntimeBindingMissingProvider
 	}
 	if !r.RuntimeKind.Valid() {
-		return ErrUnknownRuntime
+		return fmt.Errorf("%w: runtime_kind %q is not a runtimes.Mode", ErrUnknownRuntime, r.RuntimeKind)
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

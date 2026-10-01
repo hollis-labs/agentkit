@@ -3,6 +3,8 @@ package agentlaunch
 import (
 	"errors"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 func TestNativeFileValidate(t *testing.T) {
@@ -63,7 +65,7 @@ func TestLaunchPlanValidateNativeFiles(t *testing.T) {
 		Project:   ProjectSpec{ID: "p"},
 		Agent:     AgentSpec{ID: "a"},
 		Provider:  ProviderSpec{ID: "claude"},
-		Runtime:   RuntimePTY,
+		Runtime:   runtimes.ModePTY,
 		Workspace: WorkspaceSpec{Mode: WorkspaceTemp},
 		BootProfile: BootProfileRef{
 			Inline: &BootProfileInline{BootMode: BootModePlanted},
@@ -75,5 +77,36 @@ func TestLaunchPlanValidateNativeFiles(t *testing.T) {
 	}
 	if err := plan.Validate(); !errors.Is(err, ErrNativeFileMissingID) {
 		t.Fatalf("Validate() = %v, want ErrNativeFileMissingID", err)
+	}
+}
+
+func TestSkillRelPath(t *testing.T) {
+	for _, c := range []struct {
+		provider string
+		mode     runtimes.Mode
+		want     string
+	}{
+		{"claude", runtimes.ModeStreamingStdio, ".claude/skills/review/SKILL.md"},
+		{"claude-code", runtimes.ModeSubprocessPerTurn, ".claude/skills/review/SKILL.md"},
+		{"codex", runtimes.ModeJSONRPCStdio, "skills/review/SKILL.md"},
+		{"opencode", runtimes.ModeHTTPSSE, "skills/review/SKILL.md"},
+		{"agy", runtimes.ModeSubprocessPerTurn, ".agents/skills/review/SKILL.md"},
+	} {
+		got, err := SkillRelPath(c.provider, c.mode, "review")
+		if err != nil || got != c.want {
+			t.Errorf("SkillRelPath(%s, %s) = %q, %v; want %q", c.provider, c.mode, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		provider string
+		mode     runtimes.Mode
+	}{
+		{"copilot", runtimes.ModeACPStdio}, // ACP-only: no boot dir
+		{"pi", runtimes.ModeACPStdio},
+		{"gemini", runtimes.ModeSubprocessPerTurn}, // not a runtime
+	} {
+		if _, err := SkillRelPath(c.provider, c.mode, "review"); !errors.Is(err, ErrNoSkillRoot) {
+			t.Errorf("SkillRelPath(%s, %s) err = %v, want ErrNoSkillRoot", c.provider, c.mode, err)
+		}
 	}
 }

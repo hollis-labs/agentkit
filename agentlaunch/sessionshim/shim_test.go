@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 )
@@ -18,7 +19,7 @@ func validCompiled(t *testing.T) *agentlaunch.CompiledLaunch {
 		Project:   agentlaunch.ProjectSpec{ID: "proj", Root: t.TempDir()},
 		Agent:     agentlaunch.AgentSpec{ID: "agent", Name: "agent"},
 		Provider:  agentlaunch.ProviderSpec{ID: "claude"},
-		Runtime:   agentlaunch.RuntimePTY,
+		Runtime:   runtimes.ModePTY,
 		Workspace: agentlaunch.WorkspaceSpec{Mode: agentlaunch.WorkspaceTemp, TempPrefix: t.TempDir()},
 		BootProfile: agentlaunch.BootProfileRef{
 			Inline: &agentlaunch.BootProfileInline{BootMode: agentlaunch.BootModePlanted},

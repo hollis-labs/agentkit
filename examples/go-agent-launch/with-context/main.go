@@ -37,6 +37,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentcontext"
 	"github.com/hollis-labs/agentkit/agentcontext/resolvers"
 
@@ -85,7 +86,7 @@ Demo skill body.
 		Project:  agentlaunch.ProjectSpec{ID: "example", Name: "Example Project"},
 		Agent:    agentlaunch.AgentSpec{ID: "demo-agent", Name: "Demo Agent"},
 		Provider: agentlaunch.ProviderSpec{ID: "claude"},
-		Runtime:  agentlaunch.RuntimePTY,
+		Runtime:  runtimes.ModePTY,
 		Workspace: agentlaunch.WorkspaceSpec{
 			Mode:       agentlaunch.WorkspaceTemp,
 			TempPrefix: tempPrefix,

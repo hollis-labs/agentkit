@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 )
 
 func TestPlant_Claude(t *testing.T) {
 	isolateHome(t)
-	prepared := preparedFor(t, "claude", agentlaunch.RuntimePTY)
+	prepared := preparedFor(t, "claude", runtimes.ModePTY)
 	if err := Plant(context.Background(), prepared); err != nil {
 		t.Fatalf("plant: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestPlant_Claude(t *testing.T) {
 // boot files as the PTY runtime — the BootDirSpec is runtime-invariant.
 func TestPlant_ClaudeStreaming(t *testing.T) {
 	isolateHome(t)
-	prepared := preparedFor(t, "claude", agentlaunch.RuntimeStreamingStdio)
+	prepared := preparedFor(t, "claude", runtimes.ModeStreamingStdio)
 	if err := Plant(context.Background(), prepared); err != nil {
 		t.Fatalf("plant: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestPlant_ClaudeStreaming(t *testing.T) {
 
 func TestPlant_Codex(t *testing.T) {
 	isolateHome(t)
-	prepared := preparedFor(t, "codex", agentlaunch.RuntimeSubprocess)
+	prepared := preparedFor(t, "codex", runtimes.ModeSubprocessPerTurn)
 	if err := Plant(context.Background(), prepared); err != nil {
 		t.Fatalf("plant: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestPlant_Codex(t *testing.T) {
 // app-server adapter, whose BootDirSpec suppresses the --cd flag.
 func TestPlant_CodexAppServer(t *testing.T) {
 	isolateHome(t)
-	prepared := preparedFor(t, "codex", agentlaunch.RuntimeJsonRpcStdio)
+	prepared := preparedFor(t, "codex", runtimes.ModeJSONRPCStdio)
 	if err := Plant(context.Background(), prepared); err != nil {
 		t.Fatalf("plant: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestPlant_CodexAppServer(t *testing.T) {
 
 func TestPlant_Opencode(t *testing.T) {
 	isolateHome(t)
-	compiled := compiledFor(t, "opencode", agentlaunch.RuntimeSubprocess)
+	compiled := compiledFor(t, "opencode", runtimes.ModeSubprocessPerTurn)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -126,7 +127,7 @@ func TestPlant_Antigravity(t *testing.T) {
 	inj := agentlaunch.InjectionSpec{NativeFiles: []agentlaunch.NativeFile{
 		{Kind: agentlaunch.NativeFileSkill, ID: "code-review", Content: body},
 	}}
-	compiled := compiledWith(t, "antigravity", agentlaunch.RuntimeSubprocess, inj)
+	compiled := compiledWith(t, "antigravity", runtimes.ModeSubprocessPerTurn, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -162,15 +163,15 @@ func TestPlant_MatrixCombinations(t *testing.T) {
 	isolateHome(t)
 	pairs := []struct {
 		provider string
-		runtime  agentlaunch.RuntimeKind
+		runtime  runtimes.Mode
 	}{
-		{"claude", agentlaunch.RuntimeSubprocess},
-		{"claude", agentlaunch.RuntimePTY},
-		{"claude", agentlaunch.RuntimeStreamingStdio},
-		{"codex", agentlaunch.RuntimeSubprocess},
-		{"codex", agentlaunch.RuntimeJsonRpcStdio},
-		{"opencode", agentlaunch.RuntimeSubprocess},
-		{"antigravity", agentlaunch.RuntimeSubprocess},
+		{"claude", runtimes.ModeSubprocessPerTurn},
+		{"claude", runtimes.ModePTY},
+		{"claude", runtimes.ModeStreamingStdio},
+		{"codex", runtimes.ModeSubprocessPerTurn},
+		{"codex", runtimes.ModeJSONRPCStdio},
+		{"opencode", runtimes.ModeSubprocessPerTurn},
+		{"antigravity", runtimes.ModeSubprocessPerTurn},
 	}
 	for _, p := range pairs {
 		t.Run(p.provider+"/"+string(p.runtime), func(t *testing.T) {
@@ -192,7 +193,7 @@ func TestPlant_NativeFileClaudeSkill(t *testing.T) {
 			{Kind: agentlaunch.NativeFileSkill, ID: "code-review", Content: "SKILL BODY"},
 		},
 	}
-	compiled := compiledWith(t, "claude", agentlaunch.RuntimePTY, inj)
+	compiled := compiledWith(t, "claude", runtimes.ModePTY, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -215,7 +216,7 @@ func TestPlant_NativeFileOpencodeSkill(t *testing.T) {
 			{Kind: agentlaunch.NativeFileSkill, ID: "code-review", Content: body},
 		},
 	}
-	compiled := compiledWith(t, "opencode", agentlaunch.RuntimeSubprocess, inj)
+	compiled := compiledWith(t, "opencode", runtimes.ModeSubprocessPerTurn, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -241,7 +242,7 @@ func TestPlant_NativeFileRawAgentsMd(t *testing.T) {
 			{Kind: agentlaunch.NativeFileRaw, RelPath: "AGENTS.md", Content: "CALLER AGENTS.md"},
 		},
 	}
-	compiled := compiledWith(t, "codex", agentlaunch.RuntimeSubprocess, inj)
+	compiled := compiledWith(t, "codex", runtimes.ModeSubprocessPerTurn, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -264,7 +265,7 @@ func TestPlant_NativeFileModeDefault(t *testing.T) {
 			{Kind: agentlaunch.NativeFileRaw, RelPath: "secret.txt", Content: "y", Mode: 0o600},
 		},
 	}
-	compiled := compiledWith(t, "claude", agentlaunch.RuntimePTY, inj)
+	compiled := compiledWith(t, "claude", runtimes.ModePTY, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -283,7 +284,7 @@ func TestPlant_Overlay(t *testing.T) {
 			"scratch/notes.txt": "OVERLAY NOTE",
 		},
 	}
-	compiled := compiledWith(t, "claude", agentlaunch.RuntimePTY, inj)
+	compiled := compiledWith(t, "claude", runtimes.ModePTY, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -306,7 +307,7 @@ func TestPlant_OverlayOverridesProviderFile(t *testing.T) {
 	inj := agentlaunch.InjectionSpec{
 		BootDirOverlay: map[string]string{"boot.md": "OVERLAY KICKOFF"},
 	}
-	compiled := compiledWith(t, "claude", agentlaunch.RuntimePTY, inj)
+	compiled := compiledWith(t, "claude", runtimes.ModePTY, inj)
 	prepared, err := launcher.Prepare(context.Background(), compiled)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -325,7 +326,7 @@ func TestPlant_OverlayOverridesProviderFile(t *testing.T) {
 // gate is what fires.
 func TestPlant_UnsafeOverlayRejected(t *testing.T) {
 	isolateHome(t)
-	prepared := preparedFor(t, "claude", agentlaunch.RuntimePTY)
+	prepared := preparedFor(t, "claude", runtimes.ModePTY)
 	prepared.Compiled.Plan.Injection.BootDirOverlay = map[string]string{
 		"../escape.txt": "pwned",
 	}

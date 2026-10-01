@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 )
 
@@ -37,7 +38,7 @@ func TestResolve_InlineCatalog(t *testing.T) {
 	if got, want := plan.Provider.ID, "codex-cli"; got != want {
 		t.Errorf("Provider.ID = %q, want %q", got, want)
 	}
-	if got, want := plan.Runtime, agentlaunch.RuntimeSubprocess; got != want {
+	if got, want := plan.Runtime, runtimes.ModeSubprocessPerTurn; got != want {
 		t.Errorf("Runtime = %q, want %q", got, want)
 	}
 	// "hybrid" is the Tether-only workspace token; the translator maps
@@ -133,7 +134,7 @@ func TestResolve_UnsupportedRuntime(t *testing.T) {
 
 func TestResolve_ApiRuntimeRejected(t *testing.T) {
 	// Tether's "api" runtime is intentionally unmapped — it doesn't
-	// fit the agentlaunch.RuntimeKind set.
+	// fit the runtimes.Mode set.
 	g, err := LoadGlobalFromBytes(inlineCatalogBytes)
 	if err != nil {
 		t.Fatalf("LoadGlobalFromBytes: %v", err)
@@ -164,7 +165,7 @@ func TestResolve_TetherDirectoryTree(t *testing.T) {
 	if got, want := plan.Provider.ID, "codex-cli"; got != want {
 		t.Errorf("Provider.ID = %q, want %q", got, want)
 	}
-	if got, want := plan.Runtime, agentlaunch.RuntimeSubprocess; got != want {
+	if got, want := plan.Runtime, runtimes.ModeSubprocessPerTurn; got != want {
 		t.Errorf("Runtime = %q, want %q", got, want)
 	}
 }
@@ -279,7 +280,7 @@ func TestToLaunchPlan_RuntimeOverride(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 	// Per-launch runtime override wins over provider.runtime_kind.
-	if got, want := plan.Runtime, agentlaunch.RuntimePTY; got != want {
+	if got, want := plan.Runtime, runtimes.ModePTY; got != want {
 		t.Errorf("Runtime = %q, want %q (launch override should win)", got, want)
 	}
 }

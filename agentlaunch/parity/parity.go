@@ -18,7 +18,7 @@ import (
 // the new side projects it from a resolved LaunchBag. It deliberately holds
 // ONLY the fields that are launch identity in BOTH models — project, work
 // directory, runner/provider, and workspace-isolation mode. Fields that
-// exist on only one side (the old LaunchPlan's matrix-derived RuntimeKind,
+// exist on only one side (the old LaunchPlan's matrix-derived runtime mode,
 // the new template's rendered prose) are not identity and are not compared:
 // comparing them would manufacture noise, not signal.
 type NormalizedPlan struct {
@@ -390,7 +390,7 @@ var runtimeKindFromBootstrap = map[string]string{
 // are never touched. This is the documented, intentional pre-processing
 // step that lets the old-side static path resolve the live catalog at all;
 // it is recorded as the expected-diff rationale "live-catalog-runtime-kind"
-// where it affects a comparison (it does not, because RuntimeKind is not a
+// where it affects a comparison (it does not, because the runtime is not a
 // NormalizedPlan field — but the normalization is still disclosed).
 //
 // A provider that already declares runtime_kind is left untouched.

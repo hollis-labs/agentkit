@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/provider"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
@@ -113,7 +114,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 	if err != nil {
 		return nil, err
 	}
-	artifacts, err = appendInjectionArtifacts(artifacts, projection.Provider, plan.Injection)
+	artifacts, err = appendInjectionArtifacts(artifacts, projection.Provider, plan.Runtime, plan.Injection)
 	if err != nil {
 		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
 	}
@@ -137,13 +138,17 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 		return nil, fmt.Errorf("agentlaunch/providerplant: materialize: %w", err)
 	}
 
+	argv, err := finalArgv(prepared, projection, binding)
+	if err != nil {
+		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
+	}
 	env := mergePreparedEnv(prepared.Env, binding.Env)
 	execution := &agentlaunch.PreparedExecution{
 		InputKind:       agentlaunch.PrepareInputArtifacts,
 		Artifacts:       artifacts,
 		Materialization: handle,
 		Bindings: agentlaunch.ExecutionBindings{
-			Argv:       finalArgv(prepared, projection, binding),
+			Argv:       argv,
 			Env:        env,
 			CWD:        binding.CWD,
 			ConfigRoot: binding.ConfigDir,
@@ -175,7 +180,6 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 		if err != nil {
 			return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, fmt.Errorf("agentlaunch/providerplant: provider launch binding: %w", err)
 		}
-		binding.Argv = appendMissingProjectArg(binding.Argv, adapter.BootDirSpec().ProjectDirArg, bootDir, projectDir)
 		translated := agentlaunch.ProviderProjectionFromProvider(proj)
 		return translated.Artifacts, translated, binding, nil
 	}
@@ -217,13 +221,13 @@ func legacyProjection(prepared *agentlaunch.PreparedLaunch, spec provider.BootDi
 	return proj.Artifacts, proj, binding, nil
 }
 
-func appendInjectionArtifacts(base artifact.Tree, providerID string, inj agentlaunch.InjectionSpec) (artifact.Tree, error) {
+func appendInjectionArtifacts(base artifact.Tree, providerID string, mode runtimes.Mode, inj agentlaunch.InjectionSpec) (artifact.Tree, error) {
 	entries := append([]artifact.Entry(nil), base.Entries...)
 	for _, nf := range inj.NativeFiles {
 		if err := nf.Validate(); err != nil {
 			return artifact.Tree{}, fmt.Errorf("native file: %w", err)
 		}
-		rel, err := nativeFileRelPathByProvider(providerID, nf)
+		rel, err := nativeFileRelPath(providerID, mode, nf)
 		if err != nil {
 			return artifact.Tree{}, fmt.Errorf("native file: %w", err)
 		}
@@ -262,7 +266,12 @@ func upsertArtifact(entries []artifact.Entry, next artifact.Entry) []artifact.En
 	return append(entries, next)
 }
 
-func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding) []string {
+// finalArgv is [binary, projected argv..., Provider.Flags..., Injection.Args...].
+// The projected argv can end in a variadic flag (Claude's --add-dir and
+// --mcp-config take every following non-option token), so the first appended
+// token must be an option: a positional there would be swallowed as one more
+// directory or config. That is ErrPositionalAfterProjection.
+func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding) ([]string, error) {
 	plan := prepared.Compiled.Plan
 	binary := plan.Provider.Binary
 	if binary == "" {
@@ -271,12 +280,17 @@ func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.Prov
 	if binary == "" {
 		binary = projection.Provider
 	}
-	argv := make([]string, 0, 1+len(binding.Argv)+len(plan.Provider.Flags)+len(plan.Injection.Args))
+	extras := make([]string, 0, len(plan.Provider.Flags)+len(plan.Injection.Args))
+	extras = append(extras, plan.Provider.Flags...)
+	extras = append(extras, plan.Injection.Args...)
+	if len(binding.Argv) > 0 && len(extras) > 0 && !strings.HasPrefix(extras[0], "-") {
+		return nil, fmt.Errorf("%w: %q follows %q", ErrPositionalAfterProjection, extras[0], binding.Argv[len(binding.Argv)-1])
+	}
+	argv := make([]string, 0, 1+len(binding.Argv)+len(extras))
 	argv = append(argv, binary)
 	argv = append(argv, binding.Argv...)
-	argv = append(argv, plan.Provider.Flags...)
-	argv = append(argv, plan.Injection.Args...)
-	return argv
+	argv = append(argv, extras...)
+	return argv, nil
 }
 
 func mergePreparedEnv(base map[string]string, deltas []provider.EnvDelta) map[string]agentlaunch.EnvVar {
@@ -372,33 +386,14 @@ func bootPromptArg(prepared *agentlaunch.PreparedLaunch) string {
 	return prepared.BootPrompt
 }
 
-func nativeFileRelPathByProvider(providerID string, nf agentlaunch.NativeFile) (string, error) {
+func nativeFileRelPath(providerID string, mode runtimes.Mode, nf agentlaunch.NativeFile) (string, error) {
 	switch nf.Kind {
 	case agentlaunch.NativeFileRaw:
 		return nf.RelPath, nil
 	case agentlaunch.NativeFileSkill:
-		return skillRelPath(providerID, nf.ID), nil
+		return agentlaunch.SkillRelPath(providerID, mode, nf.ID)
 	default:
 		return "", fmt.Errorf("%w: %q", agentlaunch.ErrUnknownNativeFileKind, nf.Kind)
-	}
-}
-
-func skillRelPath(providerID, name string) string {
-	switch strings.ToLower(providerID) {
-	case "claude":
-		return ".claude/skills/" + name + "/SKILL.md"
-	case "opencode":
-		// OPENCODE_CONFIG_DIR is the bootdir and cwd is the project, so
-		// opencode scans <bootdir>/skills/<name>/SKILL.md; a flat file or
-		// a bootdir .opencode/skills tree is never read (opencode 1.18.30,
-		// go-providers layout probe O2).
-		return "skills/" + name + "/SKILL.md"
-	case "antigravity":
-		// agy has no config-dir variable, so skills go to the workspace
-		// customization root it discovers from cwd (the bootdir).
-		return ".agents/skills/" + name + "/SKILL.md"
-	default:
-		return "skills/" + name + ".md"
 	}
 }
 
@@ -406,22 +401,6 @@ func substituteTokens(s, bootDir, projectDir string) string {
 	s = strings.ReplaceAll(s, "{{.BootDir}}", bootDir)
 	s = strings.ReplaceAll(s, "{{.ProjectDir}}", projectDir)
 	return s
-}
-
-func appendMissingProjectArg(argv []string, pattern, bootDir, projectDir string) []string {
-	parts := substituteArgPattern(pattern, bootDir, projectDir)
-	if len(parts) == 0 {
-		return argv
-	}
-	if len(parts) >= 1 {
-		for _, arg := range argv {
-			if arg == parts[0] {
-				return argv
-			}
-		}
-	}
-	out := append([]string(nil), argv...)
-	return append(out, parts...)
 }
 
 func substituteArgPattern(pattern, bootDir, projectDir string) []string {

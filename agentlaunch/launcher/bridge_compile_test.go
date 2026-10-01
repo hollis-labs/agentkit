@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 )
 
@@ -28,7 +29,7 @@ func TestPlanFromLaunch_Compiles(t *testing.T) {
 		},
 		Runtime: agentlaunch.RuntimeBinding{
 			Provider:    "codex",
-			RuntimeKind: agentlaunch.RuntimeSubprocess,
+			RuntimeKind: runtimes.ModeSubprocessPerTurn,
 		},
 		Agent: agentlaunch.AgentSpec{ID: "torque-engineer"},
 		Mode:  agentlaunch.LaunchBackground,

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/go-materialize/materialize"
@@ -383,43 +382,18 @@ func (m *DefaultMaterializer) renderObject(
 // write target.
 //
 //   - raw injections write verbatim at the declared RelPath;
-//   - skill injections route to the provider-native skill directory keyed
-//     off the BootSpec runtime binding's Provider, mirroring the
-//     providerplant convention (.claude/skills, opencode skills/<name>/SKILL.md, neutral
-//     skills/ otherwise). The harness-specific path convention is a stable
-//     library mechanism, not consumer content.
+//   - skill injections route to <skills root>/<name>/SKILL.md, with the
+//     root read from go-providers' layout for the binding's runtime and
+//     mode (SkillRelPath). The harness-specific path convention is a
+//     stable library mechanism, not consumer content.
 func injectionRelPath(runtime RuntimeBinding, inj BootInjectionSpec) (string, error) {
 	switch inj.Kind {
 	case NativeFileRaw:
 		return inj.RelPath, nil
 	case NativeFileSkill:
-		return skillRelPath(runtime.Provider, inj.Name), nil
+		return SkillRelPath(runtime.Provider, runtime.RuntimeKind, inj.Name)
 	default:
 		return "", fmt.Errorf("%w: %q", ErrUnknownNativeFileKind, inj.Kind)
-	}
-}
-
-// skillRelPath maps a provider identity + skill name to the provider's
-// native skill-document path. Providers with no native skill directory get
-// a neutral skills/ directory for inspection parity. This mirrors the
-// providerplant.nativeFileRelPathByProvider convention so a skill planted through
-// the materializer lands where the harness expects it.
-func skillRelPath(provider, name string) string {
-	switch strings.ToLower(provider) {
-	case "claude":
-		return ".claude/skills/" + name + "/SKILL.md"
-	case "opencode":
-		// OPENCODE_CONFIG_DIR is the bootdir and cwd is the project, so
-		// opencode scans <bootdir>/skills/<name>/SKILL.md; a flat file or
-		// a bootdir .opencode/skills tree is never read (opencode 1.18.30,
-		// go-providers layout probe O2).
-		return "skills/" + name + "/SKILL.md"
-	case "antigravity":
-		// agy has no config-dir variable, so skills go to the workspace
-		// customization root it discovers from cwd (the bootdir).
-		return ".agents/skills/" + name + "/SKILL.md"
-	default:
-		return "skills/" + name + ".md"
 	}
 }
 

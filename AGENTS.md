@@ -14,7 +14,8 @@ logic, ships no persistence, and never imports Tether, Torque or Nanite.
 - `agentcontext/` resolves typed slot sources into a deterministic boot body.
   `composer.go` walks the slot list; `hash.go` canonicalizes the request.
 - `agentlaunch/` owns LaunchPlan → CompiledLaunch → PreparedLaunch.
-  `matrix/` holds the legal (provider, runtime) table, `providerplant/` renders
+  `matrix/` answers which (runtime, mode) pairs launch, read from the
+  go-providers `registry` (it holds no table), `providerplant/` renders
   provider-native boot directories, `parity/` is the old-vs-new cutover gate.
 - `agentsessions/` runs one agent process. `types.go` defines the Capabilities
   flags that select the lifecycle shape; `manager.go` owns registration,
@@ -65,6 +66,18 @@ diff rather than going green: a genuine new divergence is registered in
 mutable, so a local parity failure can reflect catalog drift rather than your
 change — and where the catalog is absent the suite skips, so CI never exercises
 it.
+
+agentkit holds no list of runtimes. Which runtimes exist, their aliases,
+binaries, modes, default mode and layout come from the go-providers
+`registry` over the agent-contracts-leaf `runtimes` vocabulary (D-73); there is
+no runtime-kind enum here and no alias for the old spellings (`subprocess`,
+`serve-http`, `pty-debug`). A runtime added to the registry must resolve with
+no agentkit edit — `TestResolveANewRegistryRuntime` (runtimebind) and
+`TestANewRegistryRuntimeResolves` (matrix) guard it. Planting a new native
+runtime still needs one edit: a constructor case in providerplant's
+`DefaultResolver`, the one per-runtime switch left (it returns
+`ErrNoNativeAdapter` until then; CW-20260930-0134). The Tether catalog's own `runtime_kind` tokens are
+translated at the catalog boundary (`mapRuntimeKind`), and nowhere else.
 
 At most one `agentsessions.Capabilities` lifecycle flag may be set — PTY,
 StreamingStdio, JsonRpcStdio and ServeHTTP are mutually exclusive. Any Runtime

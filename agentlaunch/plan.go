@@ -1,5 +1,11 @@
 package agentlaunch
 
+import (
+	"fmt"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+)
+
 // LaunchPlan is the declarative input to the launch pipeline. A
 // LaunchPlan carries everything the catalog port (CW-0003), the
 // provider × runtime matrix (CW-0004), and the compiler/preparer
@@ -34,7 +40,7 @@ type LaunchPlan struct {
 	// Runtime names the lifecycle shape (subprocess / pty /
 	// streaming-stdio / jsonrpc-stdio). The matrix sibling validates
 	// that the (Provider.ID, Runtime) pair is legal.
-	Runtime RuntimeKind `yaml:"runtime" json:"runtime"`
+	Runtime runtimes.Mode `yaml:"runtime" json:"runtime"`
 
 	// Workspace declares the workspace reservation policy.
 	Workspace WorkspaceSpec `yaml:"workspace" json:"workspace"`
@@ -79,7 +85,7 @@ func (p LaunchPlan) Validate() error {
 		return ErrMissingProviderID
 	}
 	if !p.Runtime.Valid() {
-		return ErrUnknownRuntime
+		return fmt.Errorf("%w: runtime %q is not a runtimes.Mode", ErrUnknownRuntime, p.Runtime)
 	}
 	if !p.Workspace.Mode.Valid() {
 		return ErrUnsupportedWorkspaceMode

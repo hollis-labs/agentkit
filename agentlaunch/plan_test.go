@@ -3,6 +3,8 @@ package agentlaunch
 import (
 	"errors"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // validPlan returns a LaunchPlan that passes Validate, used as the
@@ -14,7 +16,7 @@ func validPlan() LaunchPlan {
 		Provider: ProviderSpec{
 			ID: "claude",
 		},
-		Runtime: RuntimePTY,
+		Runtime: runtimes.ModePTY,
 		Workspace: WorkspaceSpec{
 			Mode: WorkspaceShared,
 		},
@@ -56,7 +58,7 @@ func TestLaunchPlanValidateErrors(t *testing.T) {
 		},
 		{
 			name:    "unknown runtime",
-			mutate:  func(p *LaunchPlan) { p.Runtime = RuntimeKind("does-not-exist") },
+			mutate:  func(p *LaunchPlan) { p.Runtime = runtimes.Mode("does-not-exist") },
 			wantErr: ErrUnknownRuntime,
 		},
 		{

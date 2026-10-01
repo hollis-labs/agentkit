@@ -1,6 +1,31 @@
 package agentlaunch
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"path"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	"github.com/hollis-labs/go-providers/layout"
+	"github.com/hollis-labs/go-providers/registry"
+)
+
+// SkillRelPath is the boot-relative path a skill named name is planted at for
+// provider (a registry id or alias) driven in mode: <skills root>/<name>/SKILL.md,
+// the directory form every harness reads, with the root from go-providers'
+// layout table. It fails with ErrNoSkillRoot for a runtime the registry does
+// not know or that has no boot dir.
+func SkillRelPath(provider string, mode runtimes.Mode, name string) (string, error) {
+	d, ok := registry.Lookup(provider)
+	if !ok {
+		return "", fmt.Errorf("%w: unknown runtime %q", ErrNoSkillRoot, provider)
+	}
+	e, ok := layout.SkillRoot(d.ID, layout.Shape{Mode: mode})
+	if !ok || e.Root != layout.RootBoot {
+		return "", fmt.Errorf("%w: %s/%s", ErrNoSkillRoot, d.ID, mode)
+	}
+	return path.Join(e.Rel, name, "SKILL.md"), nil
+}
 
 // NativeFileKind tags a NativeFile with the planting convention the
 // provider bootdir planter should apply to it. The kind is what lets

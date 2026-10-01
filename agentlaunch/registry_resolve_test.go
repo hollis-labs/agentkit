@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 )
 
 // writeRuntimeBindingFile drops a RuntimeBindingContract YAML file and returns
@@ -71,8 +73,8 @@ func TestResolveRuntimeBinding(t *testing.T) {
 	if binding.Model != "gpt-5.4" {
 		t.Errorf("Model = %q, want gpt-5.4", binding.Model)
 	}
-	if binding.RuntimeKind != RuntimeJsonRpcStdio {
-		t.Errorf("RuntimeKind = %q, want jsonrpc-stdio", binding.RuntimeKind)
+	if binding.RuntimeKind != runtimes.ModeJSONRPCStdio {
+		t.Errorf("runtimes.Mode = %q, want jsonrpc-stdio", binding.RuntimeKind)
 	}
 	if binding.Timeout != "3h" {
 		t.Errorf("Timeout = %q, want 3h", binding.Timeout)
