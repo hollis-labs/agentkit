@@ -4,6 +4,43 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.0 — 2026-10-01
+
+Turn interrupts for Codex app-server and OpenCode serve (CW-20261001-0160).
+Requires go-providers v0.40.0.
+
+### Added
+
+- **The jsonrpc-stdio session implements `TurnInterrupter`** for an adapter
+  with `provider.RPCTurnInterrupter`, which today is Codex app-server.
+  - The session follows the open turn through `turn/started` and
+    `turn/completed`. `InterruptTurn` sends `turn/interrupt` for that turn and
+    returns on Codex's `{}`.
+  - The turn then completes with `status: "interrupted"`, and the next
+    `turn/start` runs on the same process and thread.
+  - With no turn open it sends nothing. A turn that ends while the request is
+    in flight is not an error.
+- **The serve-http session implements `TurnInterrupter`** with OpenCode's
+  `POST /session/{id}/abort`. The turn ends with one error event, and the
+  server and session stay up for the next `SendInput`.
+
+### Fixed
+
+- **serve-http: an idle or error with no turn in flight no longer ends a
+  turn.**
+  - OpenCode follows a `session.error` with a `session.idle`. The session
+    reported both, so one failed turn looked like a failure followed by a
+    completion.
+  - After an abort, OpenCode sends a late second `session.idle` as the aborted
+    tool cleans up. That idle could end the next turn before its reply. A
+    turn after an abort now ends only once OpenCode has reported it `busy`.
+
+### Tested
+
+- Against go-providers' live captures, `codex/app_server_interrupt` and
+  `opencode/serve_abort`. The OpenCode test also replays the abort's cleanup
+  late, after the next prompt, as it arrived live.
+
 ## v0.19.1 — 2026-10-01
 
 ### Fixed
