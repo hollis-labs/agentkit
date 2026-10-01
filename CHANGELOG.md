@@ -4,6 +4,33 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.19.1 — 2026-10-01
+
+### Fixed
+
+- **A session's log is opened for append and never truncated**
+  (CW-20261001-0158).
+  - The serve-http, streaming-stdio, jsonrpc-stdio and pty runtimes opened
+    `StartOptions.LogPath` (or `<WorkspaceDir>/logs/session.log`) with
+    `os.Create`. That truncated the file at Start and then wrote from its own
+    offset.
+  - A host keeping its own `O_APPEND` writer on the same file (Torque tees
+    its first-turn error capture, redacted stderr and permission-decision
+    lines into it) had those lines overwritten.
+  - The log is now opened `O_APPEND|O_CREATE|O_WRONLY`, with os.Create's
+    mode, so every write, the child's stderr included, lands at the end.
+- **Decision: a fresh session does not truncate either.** agentkit cannot
+  know whether the host has already written to the file, and truncating
+  would lose exactly those lines. A host that wants a fresh log per session
+  passes a fresh path, or truncates it itself before Start. A resumed or
+  supervised-restarted session keeps appending.
+  - **Behaviour change:** a reused `LogPath` now accumulates across
+    sessions instead of starting empty.
+- **Tested:** `TestSessionLog_HostAppendWriterSurvivesSession` writes a line
+  before Start, then runs 300 host appends concurrently with 30
+  streaming-stdio turns. Every line must survive. With `os.Create` it lost
+  41, including the pre-Start line.
+
 ## v0.18.0 — 2026-10-01
 
 A cooperative turn interrupt for streaming-stdio Claude (CW-20261001-0103).
