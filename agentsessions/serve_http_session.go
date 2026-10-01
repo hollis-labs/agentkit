@@ -215,6 +215,11 @@ type serveHTTPSession struct {
 	// without compacting, which makes it the turn's failure.
 	overflow []byte
 
+	// compactionMessages are the ids of OpenCode's compaction summary
+	// messages, whose deltas are not the reply.
+	compactionMu       sync.Mutex
+	compactionMessages map[string]bool
+
 	streamCancel context.CancelFunc
 }
 
@@ -537,8 +542,15 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 			}
 			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventSessionID, SessionID: ev.Properties.SessionID})
 		}
+	case "message.updated":
+		if ev.Properties.Info.isCompaction() {
+			s.markCompactionMessage(ev.Properties.Info.ID)
+		}
 	case "message.part.delta", "session.next.text.delta":
-		if ev.Properties.Delta != "" {
+		// A compaction summary streams as this session's deltas too, but
+		// it is OpenCode condensing the context, not the reply; it stays
+		// in the raw event stream above (CW-20261001-0198).
+		if ev.Properties.Delta != "" && !s.isCompactionMessage(ev.Properties.MessageID) {
 			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: ev.Properties.Delta})
 		}
 	case "session.status":
@@ -590,14 +602,50 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 // sseProperties are the fields of an OpenCode event's properties the session
 // reads.
 type sseProperties struct {
-	SessionID string `json:"sessionID"`
-	Delta     string `json:"delta"`
+	SessionID string         `json:"sessionID"`
+	MessageID string         `json:"messageID"`
+	Delta     string         `json:"delta"`
+	Info      sseMessageInfo `json:"info"`
 	Status    struct {
 		Type string `json:"type"`
 	} `json:"status"`
 	Error struct {
 		Name string `json:"name"`
 	} `json:"error"`
+}
+
+// sseMessageInfo is the message a message.updated event describes.
+type sseMessageInfo struct {
+	ID      string          `json:"id"`
+	Mode    string          `json:"mode"`
+	Agent   string          `json:"agent"`
+	Summary json.RawMessage `json:"summary"`
+}
+
+// isCompaction reports whether the message is OpenCode's compaction summary:
+// the assistant message SessionCompaction streams, with mode and agent
+// "compaction" and summary true. A user message's summary is an object
+// ({"diffs": [...]}), which is not this (OpenCode 1.18.33, captured live).
+func (m sseMessageInfo) isCompaction() bool {
+	return m.ID != "" && (m.Mode == "compaction" || m.Agent == "compaction" || string(m.Summary) == "true")
+}
+
+func (s *serveHTTPSession) markCompactionMessage(id string) {
+	s.compactionMu.Lock()
+	defer s.compactionMu.Unlock()
+	if s.compactionMessages == nil {
+		s.compactionMessages = map[string]bool{}
+	}
+	s.compactionMessages[id] = true
+}
+
+func (s *serveHTTPSession) isCompactionMessage(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.compactionMu.Lock()
+	defer s.compactionMu.Unlock()
+	return s.compactionMessages[id]
 }
 
 // endsTurn reports whether an OpenCode event type can end or reshape the
