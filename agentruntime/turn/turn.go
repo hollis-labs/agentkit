@@ -46,11 +46,17 @@ type JSONRPCSender interface {
 
 // Frame returns the payload for raw SendInput. JSON-RPC stdio callers should
 // prefer SendTurn so typed calls do not go through the raw byte escape hatch.
+//
+// An ACP mode frames plain text: the ACP client the session runs behind
+// (go-agent-wrapper's acp.Manager) builds session/prompt from it, so the
+// caller never writes ACP JSON-RPC itself. An empty mode (an API binding) has
+// no process to frame for and is ErrUnsupportedRuntime.
 func Frame(text string, opts Options) ([]byte, error) {
 	switch opts.Runtime {
 	case runtimes.ModeStreamingStdio:
 		return ClaudeStreamingUserFrame(text)
-	case runtimes.ModeSubprocessPerTurn, runtimes.ModeHTTPSSE, runtimes.ModePTY:
+	case runtimes.ModeSubprocessPerTurn, runtimes.ModeHTTPSSE, runtimes.ModePTY,
+		runtimes.ModeACPStdio, runtimes.ModeACPTCP:
 		return []byte(text), nil
 	case runtimes.ModeJSONRPCStdio:
 		params := map[string]any{"message": text}
