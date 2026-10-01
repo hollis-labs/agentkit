@@ -98,6 +98,27 @@ runtime's boot dir still needs a `DefaultResolver` constructor case.
   - providerplant's `ErrUnknownRenderer`, both `skillRelPath` copies and
     `appendMissingProjectArg`.
 
+## v0.11.1 — 2026-10-01
+
+Patch: a child's final output is no longer lost when it exits quickly
+(CW-20261001-0046).
+
+### Fixed
+
+- **jsonrpc-stdio, serve-http and PTY sessions keep a child's last lines.**
+  - jsonrpc-stdio and serve-http read the child through `exec.Cmd`'s
+    `StdoutPipe`/`StderrPipe`, which `Cmd.Wait` closes as soon as the child
+    exits. The PTY waiters closed the master before reading it.
+  - Either way, a child that printed its last line and exited at once could
+    have that line discarded before the reader reached it. That could be a
+    Codex app-server's final frame or an agent's result line, and with it
+    the turn's completion.
+  - Each runtime now reads from a file it owns (an `os.Pipe` read end, or the
+    PTY master) and drains it to EOF after `Wait`, bounded at one second so a
+    descendant holding the output open cannot stall shutdown. This is the
+    treatment streaming-stdio already had.
+  - Applies to both the legacy and supervised lifecycles.
+
 ## v0.11.0 — 2026-10-01
 
 Minor, additive. No existing API changes; adds a dependency on go-permission

@@ -278,21 +278,27 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	// Own stdout ourselves: exec.Cmd.Wait closes StdoutPipe immediately on
+	// exit, racing the reader and discarding the child's final frames. See
+	// drainChildOutput.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		limitCleanup()
 		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: stdout pipe: %w", err)
 	}
+	cmd.Stdout = stdoutWriter
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
+		_ = stdoutWriter.Close()
 		limitCleanup()
 		sandboxCleanup()
 		return nil, nil, nil, nil, fmt.Errorf("agentsessions: start: %w", err)
 	}
+	_ = stdoutWriter.Close() // only the child retains the write end
 
 	s.reportSandboxOutcome(sandboxOutcome)
 
@@ -519,8 +525,7 @@ func (s *jsonRpcStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteClo
 		s.ioLock.Unlock()
 
 		_ = stdin.Close()
-		_ = stdout.Close()
-		<-s.copyDone
+		drainChildOutput(stdout, s.copyDone)
 		_ = s.logFile.Close()
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
@@ -691,8 +696,7 @@ func (s *jsonRpcStdioSession) waitOnceSupervised(ctx context.Context, cmd *exec.
 	s.stdout = nil
 	s.ioLock.Unlock()
 	_ = stdin.Close()
-	_ = stdout.Close()
-	<-readerDone
+	drainChildOutput(stdout, readerDone)
 
 	_ = attempt
 	return buildExitError(cmd.ProcessState, waitErr, cause.getCause())
