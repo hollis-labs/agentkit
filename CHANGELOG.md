@@ -34,6 +34,10 @@ go-providers registry (CW-20260930-0138, D-72). Requires go-providers v0.37.0.
   `OPENCODE_PERMISSION`, are set over the launch's, with source `posture`.
   The per-provider mapping, as measured, is in go-providers v0.37.0's
   CHANGELOG.
+- **`PreparedExecution.Posture`** records the Mode the bindings were mapped
+  from (empty when none), so a host that also answers the agent's approval
+  requests, such as the wrapper's `CodexApprovalResponder`, can answer from
+  the same Mode.
 - **`DefaultResolver` no longer sets `ClaudeAdapter.PermissionMode` or
   `CodexAdapter.ApprovalPolicy`.** The posture travels as launch flags
   instead. Claude's `--permission-mode` overrides a planted

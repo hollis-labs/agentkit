@@ -7,6 +7,7 @@ import (
 	"github.com/hollis-labs/agentkit/agentcontext"
 	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/go-materialize/materialize"
+	permission "github.com/hollis-labs/go-permission"
 )
 
 var (
@@ -106,6 +107,12 @@ type PreparedExecution struct {
 	// Boot is how the boot prompt reaches the agent, from the PreparedLaunch
 	// the execution was prepared from.
 	Boot BootDelivery `yaml:"boot,omitempty" json:"boot,omitempty"`
+	// Posture is the permission posture the bindings' flags and environment
+	// were mapped from (the plan's Provider.Permission), or empty when the
+	// launch names none. A host that also answers the agent's approval
+	// requests (agentkit's turn.CodexApprovalResponder) answers from the
+	// same Mode.
+	Posture permission.Mode `yaml:"posture,omitempty" json:"posture,omitempty"`
 }
 
 func (p PreparedExecution) Validate() error {

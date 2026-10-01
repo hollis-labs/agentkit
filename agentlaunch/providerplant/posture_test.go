@@ -73,6 +73,9 @@ func TestPrepareExecution_PostureFromTheRegistry(t *testing.T) {
 		}
 		checkFlagsBeforePrompt(t, label+" next turn", turn, extras)
 
+		if exec.Posture != c.posture {
+			t.Errorf("%s: PreparedExecution.Posture = %q", label, exec.Posture)
+		}
 		for name, value := range want.Env {
 			if got := exec.Bindings.Env[name]; got.Value != value || got.Source != "posture" {
 				t.Errorf("%s: env %s = %+v, want %q from the posture", label, name, got, value)

@@ -172,7 +172,8 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 			NativeFile:     len(plan.Injection.NativeFiles) > 0,
 			BootDirOverlay: len(plan.Injection.BootDirOverlay) > 0,
 		},
-		Boot: agentlaunch.BootDelivery{Mode: prepared.BootMode, Prompt: prepared.BootPrompt, Content: prepared.BootContent},
+		Boot:    agentlaunch.BootDelivery{Mode: prepared.BootMode, Prompt: prepared.BootPrompt, Content: prepared.BootContent},
+		Posture: plan.Provider.Permission,
 	}
 	if err := execution.Validate(); err != nil {
 		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
