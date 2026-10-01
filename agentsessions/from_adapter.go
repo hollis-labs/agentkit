@@ -166,8 +166,7 @@ func (r *adapterRuntime) Start(ctx context.Context, opts StartOptions) (Session,
 		inner := s.buildArgs
 		extra := append([]string(nil), opts.ExtraArgs...)
 		s.buildArgs = func(prompt, sessionID string) []string {
-			args := inner(prompt, sessionID)
-			return append(args, extra...)
+			return withExtraArgs(inner(prompt, sessionID), extra)
 		}
 	}
 

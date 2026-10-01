@@ -225,9 +225,7 @@ func (s *serveHTTPSession) spawn() error {
 	}
 
 	args := s.adapter.BuildArgs("", s.opts.BootPrompt, s.opts.SessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
-	}
+	args = withExtraArgs(args, s.opts.ExtraArgs)
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args
 	configureCommandProcessGroup(cmd)

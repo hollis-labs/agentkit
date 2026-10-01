@@ -236,9 +236,7 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 		}
 	}
 	args := s.adapter.BuildArgs("", systemPrompt, sessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
-	}
+	args = withExtraArgs(args, s.opts.ExtraArgs)
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args
 	configureCommandProcessGroup(cmd)

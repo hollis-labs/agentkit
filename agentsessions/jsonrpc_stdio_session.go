@@ -242,9 +242,7 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 		}
 	}
 	args := s.adapter.BuildArgs("", systemPrompt, sessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
-	}
+	args = withExtraArgs(args, s.opts.ExtraArgs)
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204
 	configureCommandProcessGroup(cmd)
