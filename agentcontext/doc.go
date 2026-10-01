@@ -3,7 +3,7 @@
 // ContextResult pipeline that turns a declarative, ordered list of typed
 // slot specifications plus byte/token budgets and caller-supplied
 // provenance into a deterministic boot-prompt body suitable for
-// injection into a go-agent-launch PreparedLaunch.
+// injection into an agentlaunch PreparedLaunch.
 //
 // The package sits beside agentkit/agentlaunch (the launch substrate)
 // and below the app-specific orchestrators (Tether, Torque, Nanite)
@@ -25,7 +25,10 @@
 //     library version, the request content hash, and per-slot resolver
 //     kind / byte size / content hash / fetched-at timestamps,
 //   - validation sentinels — every error path is an errors.Is
-//     comparable sentinel, never a fmt-string-only error.
+//     comparable sentinel, never a fmt-string-only error,
+//   - the composition contracts — AuthoredRecipe (base, parts, slots,
+//     documents, artifacts, merge rules) in, ResolvedComposition out, with
+//     DefaultComposer (NewComposer) applying the merge mechanics.
 //
 // # Determinism contract
 //
@@ -49,10 +52,11 @@
 //
 // # App-neutrality
 //
-// The package imports only the Go standard library and gopkg.in/yaml.v3
-// (for the boot-profile YAML shape). It does not import agentkit/agentlaunch,
-// agentkit/agentsessions, go-providers, Tether, Torque, or Nanite. It
-// makes no Vanta calls and no MCP calls. The caller is responsible for
-// routing resolved Vanta / MCP / app output into an `inline` slot if a
-// slot needs that input.
+// The package imports only the Go standard library and go-materialize's
+// artifact package (artifact.Tree, carried by the composition contracts);
+// the skills subpackage adds gopkg.in/yaml.v3 for frontmatter. It does not
+// import agentkit/agentlaunch, agentkit/agentsessions, go-providers, Tether,
+// Torque, or Nanite. It makes no Vanta calls and no MCP calls. The caller is
+// responsible for routing resolved Vanta / MCP / app output into an `inline`
+// slot if a slot needs that input.
 package agentcontext

@@ -46,15 +46,25 @@ type AdapterRuntimeConfig struct {
 }
 
 // NewFromAdapter constructs a Runtime backed by cfg.Adapter. Runtime
-// shape is selected by the lifecycle flag in cfg.Caps:
+// shape is selected by the lifecycle flag in cfg.Caps (at most one may be
+// set):
 //
-//   - cfg.Caps.PTY == false (default): subprocess-per-turn runtime.
+//   - no lifecycle flag (default): subprocess-per-turn runtime.
 //     Each SendInput drives a fresh runner.Run that invokes the underlying
 //     CLI binary; a turn ends when the runner emits EventProcessExited.
 //     Single-turn-in-flight semantics — a second SendInput while a turn is
 //     running returns ErrTurnInFlight without queueing.
 //
-//   - cfg.Caps.PTY == true: long-lived PTY runtime. The adapter binary is
+//   - cfg.Caps.StreamingStdio: long-lived child speaking NDJSON over
+//     stdin/stdout (streaming-stdio).
+//
+//   - cfg.Caps.JsonRpcStdio: long-lived child speaking JSON-RPC 2.0 over
+//     stdin/stdout (jsonrpc-stdio); its Sessions implement JsonRpcCaller.
+//
+//   - cfg.Caps.ServeHTTP: long-lived child serving an HTTP API with
+//     server-sent events (http-sse).
+//
+//   - cfg.Caps.PTY: long-lived PTY runtime. The adapter binary is
 //     spawned once at Start time under a creack/pty master; SendInput writes
 //     bytes to the PTY master. Conversation / MCP / tool-affordance state
 //     persists across turns inside the long-lived child. Resize works.
@@ -63,7 +73,7 @@ type AdapterRuntimeConfig struct {
 //     impose ErrTurnInFlight on PTY because turn boundaries on a PTY are
 //     CLI-defined, not lib-defined).
 //
-// Caps().BinaryRequired is honored on both shapes — Prepare returns an
+// Caps().BinaryRequired is honored on every shape — Prepare returns an
 // error if the adapter's Detect() finds no binary.
 //
 // Capability-driven selection means consumers do not pick a constructor;

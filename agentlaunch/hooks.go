@@ -9,8 +9,8 @@ import "context"
 //
 // The default behaviour (no hook registered) leaves the materialized
 // bootdir empty — the preparer creates the directory but writes no
-// files. Phase 2 / Phase 3 of SP-20260514-0003 supply real
-// implementations backed by go-providers' planters.
+// files. Provider files are planted after Prepare by providerplant
+// (PrepareExecution / Plant), not through this hook.
 type BootDirHook func(ctx context.Context, bootDir string, compiled *CompiledLaunch) error
 
 // ContextHook assembles mechanical context (CLAUDE.md / project files /

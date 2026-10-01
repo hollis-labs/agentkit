@@ -37,9 +37,10 @@ type LaunchPlan struct {
 	// Provider names the provider adapter (claude / codex / opencode).
 	Provider ProviderSpec `yaml:"provider" json:"provider"`
 
-	// Runtime names the lifecycle shape (subprocess / pty /
-	// streaming-stdio / jsonrpc-stdio). The matrix sibling validates
-	// that the (Provider.ID, Runtime) pair is legal.
+	// Runtime names the lifecycle shape as a runtimes.Mode
+	// (subprocess-per-turn / streaming-stdio / jsonrpc-stdio / http-sse /
+	// pty / acp-stdio / acp-tcp). The matrix sibling validates that the
+	// (Provider.ID, Runtime) pair is one the go-providers registry lists.
 	Runtime runtimes.Mode `yaml:"runtime" json:"runtime"`
 
 	// Workspace declares the workspace reservation policy.

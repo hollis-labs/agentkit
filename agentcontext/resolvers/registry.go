@@ -15,14 +15,12 @@ import (
 //   - http_json    (HTTPJSONResolver)
 //   - role_summary (RoleSummaryResolver)
 //
-// The skill_index resolver is intentionally NOT included — that kind
-// is owned by the skill-discovery layer (Subagent C / sibling
-// subpackage), and the on-disk skill model is layered on top of the
-// agentcontext contract. Callers that need skill_index should compose
-// their own resolver map, e.g.:
+// The skill_index resolver is intentionally NOT included — the
+// on-disk skill model (the skills subpackage) is layered on top of the
+// agentcontext contract. Callers that need skill_index add it with
+// WithSkillIndex, e.g.:
 //
-//	res := resolvers.Default()
-//	res[agentcontext.SlotSourceKindSkillIndex] = skill.NewIndexResolver(...)
+//	res := resolvers.WithSkillIndex(resolvers.Default())
 //
 // Each entry is constructed with its zero-config defaults. Callers
 // who need to tune individual resolvers should build their own map

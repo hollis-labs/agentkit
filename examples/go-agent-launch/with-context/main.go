@@ -3,7 +3,7 @@
 //
 // # Running
 //
-//	go run ./examples/with-context
+//	go run ./examples/go-agent-launch/with-context
 //
 // The example self-contains its skill fixture in a temp directory and
 // writes the planted context artifacts to a temp bootdir. Stdout shows

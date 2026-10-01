@@ -2,6 +2,8 @@
 
 Status: M17 handoff for Torque task `CW-20260906-0020`.
 
+> Point-in-time record. The `agentkit/artifact` and `agentkit/materialize` packages it names live in [`go-materialize`](https://github.com/hollis-labs/go-materialize) (`artifact`, `materialize`), which agentkit depends on. The tag numbers and workspace paths below are historical. The package `doc.go` files describe the current surface.
+
 This is the library-side adoption guide for the shared materialization work. It records the APIs implemented in the five shared Go modules and the sequence needed to release them. It does not perform app adoption, create downstream tasks, push commits, tag releases, or mutate Cairn, Nanite, Torque, Tether or Tachyon source.
 
 ## Final module graph

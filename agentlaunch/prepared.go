@@ -88,16 +88,14 @@ type PreparedLaunch struct {
 }
 
 // PreparedPlantContext mirrors the caller-owned portion of
-// go-providers/provider.PlantContext at the contract level. The shim
-// (CW-0005) translates between this and provider.PlantContext at the
-// integration boundary so this package stays import-free of
-// go-providers.
+// go-providers/provider.PlantContext at the contract level.
+// providerplant.PlantContextFor translates it into provider.PlantContext.
 //
 // Lib-managed fields (SystemPrompt, BootContent, ProjectDir, BootDir)
-// are NOT carried here — go-agent-sessions overrides them from the
-// other StartOptions fields, so duplicating them on this struct would
-// create two sources of truth. AgentName, MCPLoopbackURL, SelfMCPCommand,
-// SelfMCPArgs, and SelfMCPEnv do flow through verbatim.
+// are NOT carried here — they are derived from the PreparedLaunch's other
+// fields, so duplicating them on this struct would create two sources of
+// truth. AgentName, MCPLoopbackURL, SelfMCPCommand, SelfMCPArgs,
+// SelfMCPEnv and MCPServers do flow through.
 type PreparedPlantContext struct {
 	// AgentName is the agent display name the per-provider boot-file
 	// renderer references (e.g. "{{.AgentName}}" in CLAUDE.md). Empty

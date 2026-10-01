@@ -2,7 +2,7 @@
 // rule set. Each call below is shaped to fire a different rule, in
 // priority order, plus the default-chat fallback.
 //
-// Run with: go run ./examples/deterministic
+// Run with: go run ./examples/go-agent-broker/deterministic
 //
 // Expected output:
 //

@@ -1,14 +1,14 @@
-// Package contexthook bridges go-agent-launch's ContextHook extension
-// point to the go-agent-context assembly pipeline.
+// Package contexthook bridges agentlaunch's ContextHook extension
+// point to the agentcontext assembly pipeline.
 //
 // # Why a subpackage
 //
 // agentlaunch declares the hook TYPE (ContextHook) but ships no concrete
 // implementation — by design. Per the boundary documented in
 // agentlaunch/hooks.go, the default behaviour is "no hook registered →
-// empty boot prompt." A concrete implementation belongs OUTSIDE the
-// top-level agentlaunch package so the launch contract does not gain a
-// reverse dependency on context assembly.
+// empty boot prompt." A concrete implementation lives OUTSIDE the
+// top-level agentlaunch package so the launch contract does not choose a
+// context provider or resolver set for its callers.
 //
 // This subpackage supplies that implementation, backed by the sibling
 // agentkit/agentcontext package. The adapter is a one-way bridge:
