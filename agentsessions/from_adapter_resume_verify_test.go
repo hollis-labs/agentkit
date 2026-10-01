@@ -221,12 +221,53 @@ func TestAdapterRuntime_PreflightRefusesStart(t *testing.T) {
 }
 
 func TestAdapterRuntime_AuthFailureIsTyped(t *testing.T) {
-	sess, _, _, _, dir := startAgyLike(t, &agyLikeAdapter{keepsID: true}, "")
+	sess, fanout, _, typed, dir := startAgyLike(t, &agyLikeAdapter{keepsID: true}, "")
 	if err := os.WriteFile(filepath.Join(dir, "auth"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.SendInput(context.Background(), []byte("x")); !errors.Is(err, provider.ErrProviderNotAuthenticated) {
 		t.Fatalf("err = %v; want ErrProviderNotAuthenticated", err)
+	}
+	// CW-20260930-0137: the failure is also a typed event and a Fanout
+	// marker, so a consumer reading events (not the SendInput error) sees it.
+	var auth []events.AuthFailed
+	for _, ev := range *typed {
+		if a, ok := ev.(events.AuthFailed); ok {
+			auth = append(auth, a)
+		}
+	}
+	if len(auth) != 1 || auth[0].Message == "" {
+		t.Errorf("typed AuthFailed = %#v; want one with a message", auth)
+	}
+	if !strings.Contains(fanout.String(), "[auth_failed]") {
+		t.Errorf("fanout = %q; want an [auth_failed] marker", fanout.String())
+	}
+}
+
+// Typed events are tapped on the subprocess path even without a
+// TypedEventCallback, so a permission denial still reaches the byte Fanout.
+func TestAdapterRuntime_TypedTapIsOnWithoutACallback(t *testing.T) {
+	a := &agyLikeAdapter{keepsID: true}
+	dir := t.TempDir()
+	a.script = writeAgyLikeScript(t, dir)
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{ID: "agy-like", Kind: "cli", Adapter: a, Caps: Capabilities{ProviderSessionID: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fanout bytes.Buffer
+	sess, err := rt.Start(context.Background(), StartOptions{Workdir: dir, Fanout: &fanout})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()) })
+	if err := os.WriteFile(filepath.Join(dir, "deny"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SendInput(context.Background(), []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fanout.String(), "[permission_denied:command] RunCommand") {
+		t.Errorf("fanout = %q; want the permission-denied marker without a callback", fanout.String())
 	}
 }
 
