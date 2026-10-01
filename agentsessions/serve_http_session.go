@@ -239,34 +239,50 @@ func (s *serveHTTPSession) spawn() error {
 		cmd.ExtraFiles = s.opts.ExtraFiles
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	// Own stdout and stderr ourselves: exec.Cmd.Wait closes StdoutPipe and
+	// StderrPipe immediately on exit, racing the scanners and discarding
+	// the child's final lines. See drainChildOutput.
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("agentsessions: stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = stdout.Close()
+		_ = stdoutWriter.Close()
 		return fmt.Errorf("agentsessions: stderr pipe: %w", err)
+	}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	closePipes := func() {
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		_ = stderr.Close()
+		_ = stderrWriter.Close()
 	}
 
 	sandboxOutcome, sandboxCleanup, err := prepareSandboxForCommand(cmd, s.opts)
 	if err != nil {
+		closePipes()
 		return err
 	}
 
 	limitCleanup, err := applyResourceLimits(cmd, s.opts.ResourceLimits)
 	if err != nil {
+		closePipes()
 		sandboxCleanup()
 		return fmt.Errorf("agentsessions: apply resource limits: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		_ = stderr.Close()
+		closePipes()
 		limitCleanup()
 		sandboxCleanup()
 		return fmt.Errorf("agentsessions: start: %w", err)
 	}
+	// Only the child retains the write ends.
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
 
 	s.reportSandboxOutcome(sandboxOutcome)
 
@@ -276,10 +292,14 @@ func (s *serveHTTPSession) spawn() error {
 		s.lastPID.Store(int32(cmd.Process.Pid))
 	}
 
-	go s.scanProcessOutput(stdout)
-	go s.scanProcessOutput(stderr)
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() { defer close(stdoutDone); s.scanProcessOutput(stdout) }()
+	go func() { defer close(stderrDone); s.scanProcessOutput(stderr) }()
 	go func() {
 		err := cmd.Wait()
+		drainChildOutput(stdout, stdoutDone)
+		drainChildOutput(stderr, stderrDone)
 		limitCleanup()
 		if sandboxCleanup != nil {
 			sandboxCleanup()
