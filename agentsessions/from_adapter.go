@@ -153,6 +153,9 @@ func (r *adapterRuntime) Start(ctx context.Context, opts StartOptions) (Session,
 	s.sessionID.Store(opts.SessionIDPreset)
 	s.alive.Store(true)
 	s.state.Store(int32(LiveStateIdle))
+	if opts.Launch != nil && s.buildArgs != nil {
+		return nil, errors.New("agentsessions: AdapterRuntimeConfig.BuildArgs and a launch template (StartOptions.Launch) are mutually exclusive: the template owns every turn's argv")
+	}
 	launchArgs := false
 	if s.buildArgs == nil {
 		if opts.Launch != nil {

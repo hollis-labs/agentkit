@@ -65,9 +65,9 @@ func TestPrepareAndPlant_WithPlantOption(t *testing.T) {
 // The projected Claude argv carries --add-dir <project> itself
 // (go-providers v0.31.0); providerplant appends nothing, so it appears
 // exactly once, in every mode. DefaultResolver builds each mode's own Claude
-// adapter, so the argv differs by mode: print carries the boot prompt after
-// -p, streaming-stdio carries no prompt (turns arrive on stdin) and the TUI no
-// print flags at all.
+// adapter, so the argv differs by mode: print carries -p and the boot prompt
+// last, after "--"; streaming-stdio carries no prompt (turns arrive on stdin)
+// and the TUI no print flags at all.
 func TestPrepareExecution_ClaudeProjectDirOnce(t *testing.T) {
 	isolateHome(t)
 	for _, mode := range []runtimes.Mode{runtimes.ModeStreamingStdio, runtimes.ModeSubprocessPerTurn, runtimes.ModePTY} {

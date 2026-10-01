@@ -91,6 +91,13 @@ func applyStartOptions(opts *StartOptions, prepared *agentlaunch.PreparedExecuti
 	if prepared.Materialization != nil {
 		opts.AutoPlantBootDir = false
 	}
+	// The boot fields travel on the prepared execution; a caller that set
+	// its own keeps them.
+	if opts.BootMode == "" && opts.BootPrompt == "" && opts.BootContent == "" {
+		opts.BootMode = prepared.Boot.Mode
+		opts.BootPrompt = prepared.Boot.Prompt
+		opts.BootContent = prepared.Boot.Content
+	}
 	return nil
 }
 
@@ -99,6 +106,16 @@ func normalizeStartOptions(opts StartOptions) (StartOptions, error) {
 		if err := applyStartOptions(&opts, opts.PreparedExecution); err != nil {
 			return StartOptions{}, err
 		}
+	}
+	if opts.Launch != nil {
+		// The session keeps its own copy: editing the caller's template
+		// after Start must not rewrite later turns' argv.
+		opts.Launch = opts.Launch.Clone()
+		if err := DeliverStreamingBoot(&opts, opts.Launch.Convention.Mode); err != nil {
+			return StartOptions{}, fmt.Errorf("agentsessions: deliver boot prompt: %w", err)
+		}
+	}
+	if opts.PreparedExecution != nil {
 		policy, err := sandboxPolicyFromPrepared(opts.PreparedExecution, opts.Workdir)
 		if err != nil {
 			return StartOptions{}, err

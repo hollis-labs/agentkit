@@ -40,3 +40,16 @@ type BootDelivery struct {
 	Prompt  string `yaml:"prompt,omitempty" json:"prompt,omitempty"`
 	Content string `yaml:"content,omitempty" json:"content,omitempty"`
 }
+
+// Clone returns a deep copy of t, so a holder can keep it unchanged while the
+// original is edited.
+func (t *TurnTemplate) Clone() *TurnTemplate {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	c.Convention.Argv = append([]provider.ArgTemplate(nil), t.Convention.Argv...)
+	c.Convention.Env = append([]provider.EnvDelta(nil), t.Convention.Env...)
+	c.ExtraArgs = append([]string(nil), t.ExtraArgs...)
+	return &c
+}

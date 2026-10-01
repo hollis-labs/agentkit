@@ -154,8 +154,10 @@ func TestPreparedPerTurnClaude_EachTurnCarriesItsPromptAndResumeID(t *testing.T)
 		{"second turn", fixtureSessionID(t, "claude/print_turn1.jsonl")},
 	} {
 		c := calls[i]
-		if got, _ := c.ArgAfter("-p"); got != want.prompt {
-			t.Errorf("turn %d: -p %q, want %q: %q", i+1, got, want.prompt, c.Args)
+		// go-providers v0.34.1 puts the prompt last, after "--", so no flag
+		// can read it as a value.
+		if n := len(c.Args); n < 2 || c.Args[n-2] != "--" || c.Args[n-1] != want.prompt {
+			t.Errorf("turn %d: argv does not end in -- %q: %q", i+1, want.prompt, c.Args)
 		}
 		if got, _ := c.ArgAfter("--resume"); got != want.resume {
 			t.Errorf("turn %d: --resume %q, want %q: %q", i+1, got, want.resume, c.Args)
@@ -163,7 +165,7 @@ func TestPreparedPerTurnClaude_EachTurnCarriesItsPromptAndResumeID(t *testing.T)
 		if c.HasArg(bootKickoff) {
 			t.Errorf("turn %d: argv still carries the boot kickoff: %q", i+1, c.Args)
 		}
-		for _, flag := range []string{"-p", "--output-format", "--mcp-config", "--add-dir", "--model"} {
+		for _, flag := range []string{"-p", "--output-format", "--mcp-config", "--add-dir", "--model", "--"} {
 			if n := countArg(c.Args, flag); n != 1 {
 				t.Errorf("turn %d: %s appears %d times, want once: %q", i+1, flag, n, c.Args)
 			}
@@ -245,5 +247,93 @@ func TestPreparedCodexAppServer_ArgvIsNotDoubled(t *testing.T) {
 	c := waitForCalls(t, fake, 1, func(providertest.Call) bool { return true })[0]
 	if !slices.Equal(c.Args, []string{"app-server"}) {
 		t.Errorf("argv = %q, want exactly [app-server]", c.Args)
+	}
+}
+
+// The wrapper hands PreparedExecution straight to Start, with no shim: Start
+// itself takes the boot fields from the prepared execution and delivers a
+// streaming-stdio launch's boot prompt as the first stdin turn.
+func TestDirectPreparedExecution_StreamingClaudeBootArrivesOnStdin(t *testing.T) {
+	_, exec := preparedFor(t, "claude", runtimes.ModeStreamingStdio, agentlaunch.InjectionSpec{})
+	fake := providertest.New(t, runtimes.Claude, providertest.Replay("claude/stream_resume"))
+	adapter := provider.NewClaudeAdapterStreamingStdio()
+	adapter.Binary = fake.Path
+	startSession(t, adapter, agentsessions.Capabilities{StreamingStdio: true}, agentsessions.StartOptions{
+		Workdir:           exec.Bindings.CWD,
+		WorkspaceDir:      exec.Roots.StateRoot,
+		PreparedExecution: exec,
+	})
+	c := waitForCalls(t, fake, 1, func(c providertest.Call) bool { return len(c.Stdin) > 0 })[0]
+	if !strings.Contains(c.Stdin[0], `"type":"user"`) || !strings.Contains(c.Stdin[0], bootKickoff) {
+		t.Fatalf("first stdin line = %q, want the framed boot kickoff", c.Stdin[0])
+	}
+}
+
+// The session resolves argv from its own copy of the template: editing the
+// caller's after Start changes nothing.
+func TestPreparedTemplateEditedAfterStartDoesNotChangeArgv(t *testing.T) {
+	_, exec := preparedFor(t, "claude", runtimes.ModeSubprocessPerTurn, agentlaunch.InjectionSpec{})
+	fake := providertest.New(t, runtimes.Claude, providertest.Replay("claude/print_turn1"))
+	sl, err := ToSessionLaunchFromPreparedExecution(exec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := provider.NewClaudeAdapter()
+	adapter.Binary = fake.Path
+	sess := startSession(t, adapter, agentsessions.Capabilities{ProviderSessionID: true}, sl.Options)
+	exec.Bindings.Launch.ExtraArgs = append(exec.Bindings.Launch.ExtraArgs, "--injected-after-start")
+	exec.Bindings.Launch.Convention.Argv[1].Value = "--mutated"
+	if err := sess.SendInput(context.Background(), []byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	c := waitForCalls(t, fake, 1, func(c providertest.Call) bool { return c.Exited })[0]
+	if c.HasArg("--injected-after-start") || c.HasArg("--mutated") {
+		t.Errorf("an edit after Start reached the argv: %q", c.Args)
+	}
+}
+
+// A prepared JSON-RPC child takes turns as calls; BootMode stdin must not
+// write the raw boot prompt into its stream.
+func TestPreparedCodexAppServer_NoRawBootPromptOnStdin(t *testing.T) {
+	_, exec := preparedFor(t, "codex", runtimes.ModeJSONRPCStdio, agentlaunch.InjectionSpec{})
+	exec.Boot.Mode = agentlaunch.BootModeStdin
+	fake := providertest.New(t, runtimes.Codex, providertest.Script(providertest.AwaitEOF()))
+	adapter := provider.NewCodexAdapterAppServer()
+	adapter.Binary = fake.Path
+	sess := startSession(t, adapter, agentsessions.Capabilities{JsonRpcStdio: true}, agentsessions.StartOptions{
+		Workdir:           exec.Bindings.CWD,
+		WorkspaceDir:      exec.Roots.StateRoot,
+		PreparedExecution: exec,
+	})
+	waitForCalls(t, fake, 1, func(providertest.Call) bool { return true })
+	time.Sleep(100 * time.Millisecond)
+	_ = sess.Stop(context.Background())
+	_, _ = sess.Wait()
+	if got := fake.Call(0).Stdin; len(got) != 0 {
+		t.Errorf("stdin = %q, want nothing written", got)
+	}
+}
+
+// A caller's BuildArgs override and a launch template both claim the argv;
+// Start refuses the pair instead of silently dropping the template.
+func TestLaunchTemplateAndBuildArgsOverrideAreExclusive(t *testing.T) {
+	_, exec := preparedFor(t, "claude", runtimes.ModeSubprocessPerTurn, agentlaunch.InjectionSpec{})
+	sl, err := ToSessionLaunchFromPreparedExecution(exec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := agentsessions.NewFromAdapter(agentsessions.AdapterRuntimeConfig{
+		ID:        "test",
+		Adapter:   provider.NewClaudeAdapter(),
+		BuildArgs: func(prompt, _ string) []string { return []string{prompt} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess, err := rt.Start(context.Background(), sl.Options); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		if sess != nil {
+			_ = sess.Stop(context.Background())
+		}
+		t.Fatalf("Start = %v, want the BuildArgs/template conflict", err)
 	}
 }

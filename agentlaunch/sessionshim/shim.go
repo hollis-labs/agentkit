@@ -35,7 +35,6 @@ import (
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/providerplant"
-	"github.com/hollis-labs/agentkit/agentruntime/turn"
 )
 
 // ErrNilPrepared is returned by ToSessionLaunch when the prepared argument is
@@ -82,7 +81,7 @@ type SessionLaunch struct {
 //   - Options.AutoPlantBootDir stays false (bootdir already planted)
 //
 // A streaming-stdio launch takes its boot prompt as its first stdin turn; see
-// deliverStreamingBoot.
+// agentsessions.DeliverStreamingBoot.
 //
 // The prepared launch must pass PreparedLaunch.Validate (non-nil
 // compiled plan, planted bootdir, workspace dir, non-empty argv).
@@ -109,7 +108,7 @@ func ToSessionLaunch(prepared *agentlaunch.PreparedLaunch) (SessionLaunch, error
 	if prepared.Launch == nil {
 		opts.ExtraArgs = append([]string(nil), prepared.Argv[1:]...)
 	}
-	if err := deliverStreamingBoot(&opts, prepared.Compiled.Plan.Runtime); err != nil {
+	if err := agentsessions.DeliverStreamingBoot(&opts, prepared.Compiled.Plan.Runtime); err != nil {
 		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
 	}
 	return SessionLaunch{Binary: prepared.Argv[0], Options: opts}, nil
@@ -145,38 +144,10 @@ func ToSessionLaunchFromPreparedExecution(prepared *agentlaunch.PreparedExecutio
 	} else {
 		opts.ExtraArgs = append([]string(nil), prepared.Bindings.Argv[1:]...)
 	}
-	if err := deliverStreamingBoot(&opts, mode); err != nil {
+	if err := agentsessions.DeliverStreamingBoot(&opts, mode); err != nil {
 		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
 	}
 	return SessionLaunch{Binary: prepared.Bindings.Argv[0], Options: opts}, nil
-}
-
-// deliverStreamingBoot gives a streaming-stdio launch its boot prompt. Claude
-// in streaming-stdio mode takes every turn, the first included, as a
-// stream-json frame on stdin, and its argv carries no prompt, so the boot
-// prompt (BootContent, else BootPrompt) becomes the auto-fired first turn,
-// framed. BootMode and BootPrompt are cleared so the session does not also
-// write the unframed prompt to stdin. BootMode "none" opts out.
-func deliverStreamingBoot(opts *agentsessions.StartOptions, mode runtimes.Mode) error {
-	if mode != runtimes.ModeStreamingStdio || opts.BootMode == agentlaunch.BootModeNone {
-		return nil
-	}
-	text := opts.BootContent
-	if text == "" {
-		text = opts.BootPrompt
-	}
-	if text == "" {
-		return nil
-	}
-	payload, err := turn.Frame(text, turn.Options{Runtime: runtimes.ModeStreamingStdio})
-	if err != nil {
-		return err
-	}
-	opts.AutoFireFirstTurn = true
-	opts.FirstTurnPayload = payload
-	opts.BootMode = ""
-	opts.BootPrompt = ""
-	return nil
 }
 
 // envKV flattens a map into the sorted "KEY=VALUE" slice form
