@@ -180,6 +180,21 @@ type SandboxOutcomeReporter interface {
 	SandboxOutcome() (SandboxOutcome, bool)
 }
 
+// TurnInterrupter is the optional interface a Session implements when its
+// runtime can end the turn in flight and keep its process: the next input
+// starts a new turn on the same process, with its in-process state, rather
+// than a cold start. InterruptTurn returns once the CLI has acknowledged the
+// interrupt (or ctx ends); the interrupted turn then ends the CLI's own way,
+// on the session's event stream. With no turn in flight it is acknowledged
+// and nothing else happens.
+//
+// Callers type-assert to this interface; it is not part of the core Session
+// contract. A session whose adapter does not speak an interrupt
+// (provider.TurnInterrupter) returns ErrInterruptUnsupported.
+type TurnInterrupter interface {
+	InterruptTurn(ctx context.Context) error
+}
+
 // JsonRpcCaller is the optional interface a Session implements when the
 // runtime speaks JSON-RPC 2.0 over its stdio channel
 // (Caps().JsonRpcStdio == true). Call sends a typed request, blocks on
@@ -761,6 +776,14 @@ var (
 	// writable input channel — typically a session that has terminated
 	// or a runtime kind that does not accept mid-flight input.
 	ErrNoInputChannel = errors.New("agentsessions: session has no input channel")
+
+	// ErrInterruptUnsupported is returned by InterruptTurn when the
+	// session's adapter has no turn interrupt (provider.TurnInterrupter).
+	ErrInterruptUnsupported = errors.New("agentsessions: the session's adapter cannot interrupt a turn")
+
+	// ErrInterruptUnanswered is returned by InterruptTurn when the
+	// session's output ends before the CLI acknowledged the interrupt.
+	ErrInterruptUnanswered = errors.New("agentsessions: the session ended before the interrupt was acknowledged")
 
 	// ErrTurnInFlight is returned by SendInput when a turn is already
 	// running. Adapters that enforce single-turn-in-flight semantics

@@ -4,7 +4,7 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v0.18.0 — 2026-10-01
+## v0.19.0 — 2026-10-01
 
 Hosts can write-protect their control-plane state from the agents they
 launch (CW-20260930-0237). Requires go-sandbox v0.5.0.
@@ -42,6 +42,31 @@ launch (CW-20260930-0237). Requires go-sandbox v0.5.0.
     database sidecar would defeat it;
   - a path through a symlink the agent could re-point;
   - on Linux, a missing path the agent could create.
+
+## v0.18.0 — 2026-10-01
+
+A cooperative turn interrupt for streaming-stdio Claude (CW-20261001-0103).
+Requires go-providers v0.39.0.
+
+### Added
+
+- **`agentsessions.TurnInterrupter`**, an optional Session interface:
+  `InterruptTurn(ctx)` ends the turn in flight and keeps the process. The
+  streaming-stdio session implements it for an adapter with
+  `provider.TurnInterrupter` (Claude), as follows:
+  - It writes Claude's stream-json `control_request` interrupt on stdin, and
+    returns when Claude's `control_response` answers it, or when ctx ends.
+  - The interrupted turn ends on the event stream as Claude ends it: an error
+    result whose `terminal_reason` is `aborted_tools` (a tool was running) or
+    `aborted_streaming` (the model was generating).
+  - The next `SendInput` runs a normal turn on the same process, so in-process
+    state survives and there is no `--resume` cold start.
+  - With no turn in flight, Claude acknowledges and nothing else happens.
+  - Errors: `ErrInterruptUnsupported` for an adapter without an interrupt,
+    `provider.ErrInterruptRefused` for Claude's refusal, and
+    `ErrInterruptUnanswered` when the session's output ends first.
+- Tested against go-providers' live `claude/stream_interrupt` capture
+  (claude 2.1.286).
 
 ## v0.17.0 — 2026-10-01
 
