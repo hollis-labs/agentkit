@@ -31,9 +31,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Tested:**
     - `TestAdapterArgsPrefersTheConventionSlot` covers the builder, the
       fallback and the "--" tail.
+    - `TestSubprocessSession_ExtraArgsWithTheirOwnDashDashAreAppendedAsBefore`
+      runs a session with an extra that carries its own "--" and checks the
+      argv is `BuildArgs`' output followed by the extras unchanged.
     - `TestAutoPlantedCodexExecResumesWithCdBeforeResume` now includes an
-      exec-only `-s read-only` that lands in front of `resume`. With the
-      builder disabled, both fail.
+      exec-only `-s read-only` that lands in front of `resume`.
+    - With the builder disabled the last two fail; with the "--" guard
+      removed the first two do.
+
+## v0.20.6 — 2026-10-01
+
+### Fixed
+
+- **OpenCode serve: reasoning reaches the turn as thought, not reply text**
+  (CW-20261001-0209). OpenCode streams a reasoning part's text as the same
+  `message.part.delta` event as the reply's. Only the earlier
+  `message.part.updated`, with `part.type: "reasoning"`, tells them apart.
+  The serve-http runtime forwarded both as unclassified `EventDelta`s, so a
+  reasoning model's thinking was spliced into the reply.
+  - The runtime now records reasoning part ids. It emits their deltas with
+    `Phase: llmtypes.PhaseThinking` (`"thought"`) and `BlockID` set to the
+    part id, the same classification go-providers' `opencode run` parser
+    gives reasoning.
+  - Text parts, deltas with no part announcement, and deltas with no
+    `partID` are unchanged.
+  - The compaction summary's reasoning is still held back entirely
+    (v0.20.5).
+  - The event shapes come from the same live capture of OpenCode 1.18.33.
+
+## v0.20.5 — 2026-10-01
+
+### Fixed
+
+- **OpenCode serve: the compaction summary no longer reaches the turn as
+  reply text** (CW-20261001-0198). When OpenCode compacts a session, either
+  after a `ContextOverflowError` or because it was asked to, it streams the
+  summary as ordinary `message.part.delta` events for that same session.
+  The serve-http runtime forwarded every one as an `EventDelta`, so the
+  summary was spliced into the reply between the text before the overflow
+  and the text after it.
+  - The runtime now records the compaction message from its
+    `message.updated` (`mode`/`agent` `"compaction"`, `summary: true`). It
+    drops the deltas whose `messageID` belongs to that message, including
+    the summary's reasoning part.
+  - Those events still appear in the raw event stream (session log,
+    `Fanout`).
+  - A user message's object-valued `summary` (`{"diffs": [...]}`) does not
+    mark anything. Deltas with no `messageID` pass through.
+  - The event shapes come from a live capture of OpenCode 1.18.33
+    compacting a session.
 
 ## v0.20.4 — 2026-10-01
 
