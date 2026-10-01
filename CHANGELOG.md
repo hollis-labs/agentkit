@@ -4,6 +4,30 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.14.1 — 2026-10-01
+
+A child output line over 1 MiB no longer stops a session (CW-20261001-0086).
+
+### Fixed
+
+- **Session readers survive long lines.** Every runtime (jsonrpc-stdio,
+  streaming-stdio, PTY, serve-http) read child stdout through a
+  `bufio.Scanner` with a 1 MiB cap. A longer line, such as a Codex
+  `item/completed` carrying a command's whole output or a Claude `tool_result`
+  carrying a file, ended the reader. Nothing drained stdout after that: the
+  child blocked on the full pipe while the session still reported alive, and
+  every later `Call` waited out its deadline (torque#149's lost steering).
+  Lines up to 64 MiB are now routed whole. A longer line is read through,
+  skipped and noted in the process log and the session log, and reading
+  carries on.
+- **A reader failure is no longer silent.** When the jsonrpc-stdio or
+  streaming-stdio reader stops on a real read error (not EOF or a closed read
+  end), the session records the fault: `Health` reports it not alive, and
+  `Call` and `SendInput` fail at once with the reader's error. The pipe keeps
+  draining so the child cannot block. A jsonrpc `Call` made after the reader
+  has stopped also fails at once, instead of registering a response nobody
+  will read.
+
 ## v0.14.0 — 2026-10-01
 
 Event vocabulary on the subprocess path (CW-20260930-0137; CW-20260930-0222

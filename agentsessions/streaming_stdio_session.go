@@ -3,7 +3,6 @@
 package agentsessions
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -174,10 +173,13 @@ type streamingStdioSession struct {
 	// spawn and does not take this lock.
 	ioLock sync.Mutex
 
-	state      atomic.Int32 // LiveState
-	alive      atomic.Bool
-	startedPID atomic.Int32
-	lastPID    atomic.Int32
+	state atomic.Int32 // LiveState
+	alive atomic.Bool
+	// readerFault is set when the stdout reader failed; the session is
+	// then no longer usable.
+	readerFault readerFault
+	startedPID  atomic.Int32
+	lastPID     atomic.Int32
 	// spawnedAt is the most-recent successful cmd.Start time as unix
 	// nanoseconds. Set inside spawnAttempt after cmd.Start; read by the
 	// waiter paths to compute elapsed-since-spawn for the abnormal-wait
@@ -345,23 +347,20 @@ func (s *streamingStdioSession) spawnReaderLegacy(stdout io.Reader) {
 	}()
 }
 
-// runReaderLoop scans stdout line by line, tees to logFile + Fanout, fans
+// runReaderLoop reads stdout line by line, tees to logFile + Fanout, fans
 // out parsed events, ticks activity. Shared between legacy and supervised
-// paths. Returns when the scanner sees EOF (typically because the child
-// exited and the pipe closed).
+// paths. Returns at EOF (typically because the child exited and the pipe
+// closed). A line too long to route is skipped and noted, never left in the
+// pipe; a read failure marks the session unusable and keeps draining.
 func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 	var sink io.Writer = s.logFile
 	if s.opts.Fanout != nil {
 		sink = io.MultiWriter(s.logFile, s.opts.Fanout)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-
 	_, hasParser := s.adapter.(provider.EventParser)
 
-	for scanner.Scan() {
-		raw := scanner.Bytes()
+	err := readLines(stdout, func(raw []byte) {
 		s.tickActivity()
 		line := make([]byte, len(raw)+1)
 		copy(line, raw)
@@ -391,6 +390,9 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 				s.opts.TypedEventCallback(te)
 			}
 		}
+	}, func(n int) { noteOversizeLine(s.logFile, "streaming-stdio", s.runtime.cfg.ID, n) })
+	if readerFailed(err) {
+		failReader(&s.readerFault, "streaming-stdio", s.runtime.cfg.ID, err, stdout)
 	}
 }
 
@@ -763,6 +765,9 @@ func (s *streamingStdioSession) Stop(ctx context.Context) error {
 }
 
 func (s *streamingStdioSession) SendInput(_ context.Context, data []byte) error {
+	if err := s.readerFault.get(); err != nil {
+		return err
+	}
 	if !s.alive.Load() {
 		return ErrNoInputChannel
 	}
@@ -795,7 +800,7 @@ func (s *streamingStdioSession) Health() HealthStatus {
 		pid = int(s.startedPID.Load())
 	}
 	return HealthStatus{
-		Alive: s.alive.Load(),
+		Alive: s.alive.Load() && s.readerFault.get() == nil,
 		PID:   pid,
 		State: LiveState(s.state.Load()),
 	}
