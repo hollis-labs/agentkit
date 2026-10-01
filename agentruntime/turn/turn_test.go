@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/hollis-labs/agentkit/agentruntime/runtimekind"
+	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
+	"github.com/hollis-labs/go-providers/provider"
 )
 
 func TestClaudeStreamingUserFrame(t *testing.T) {
@@ -125,6 +128,126 @@ func TestDecodeCodexThreadIDErrors(t *testing.T) {
 	}
 }
 
+func TestCodexAppServerSessionResumesPresetThread(t *testing.T) {
+	rpc := &recordingRPC{responses: map[string]json.RawMessage{
+		"thread/resume": json.RawMessage(`{"thread":{"id":"thread-old"}}`),
+	}}
+	var session CodexAppServerSession
+	opts := CodexAppServerOptions{CWD: "/work/root", ResumeThreadID: "thread-old"}
+	for _, text := range []string{"first", "second"} {
+		if err := session.SendTurn(context.Background(), rpc, text, opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := rpc.methods(), []string{"initialize", "thread/resume", "turn/start", "turn/start"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("methods = %v, want %v", got, want)
+	}
+	resume := rpc.calls[1].params.(map[string]any)
+	if resume["threadId"] != "thread-old" || resume["cwd"] != "/work/root" || resume["excludeTurns"] != true {
+		t.Fatalf("thread/resume params = %v", resume)
+	}
+	if turn := rpc.calls[2].params.(map[string]any); turn["threadId"] != "thread-old" {
+		t.Fatalf("turn/start threadId = %v", turn["threadId"])
+	}
+	if session.ThreadID() != "thread-old" {
+		t.Fatalf("ThreadID = %q", session.ThreadID())
+	}
+}
+
+func TestCodexAppServerSessionLostThreadIsAnErrorNotAFreshThread(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"typed rpc error", &agentsessions.JsonRpcError{Code: -32600, Message: "no rollout found for thread id thread-gone"}},
+		{"wrapped by the caller's sender", fmt.Errorf("manager call: %w", &agentsessions.JsonRpcError{Code: -32600, Message: "invalid session id: invalid character"})},
+		{"flattened to text by the caller's sender", errors.New("jsonrpc error -32600: no rollout found for thread id thread-gone")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rpc := &recordingRPC{errs: map[string]error{"thread/resume": tc.err}}
+			var session CodexAppServerSession
+			opts := CodexAppServerOptions{ResumeThreadID: "thread-gone"}
+			for attempt := 0; attempt < 2; attempt++ {
+				err := session.SendTurn(context.Background(), rpc, "hello", opts)
+				if !errors.Is(err, provider.ErrProviderSessionLost) {
+					t.Fatalf("attempt %d: err = %v, want ErrProviderSessionLost", attempt, err)
+				}
+				var lost *agentsessions.SessionLostError
+				if !errors.As(err, &lost) || lost.RequestedID != "thread-gone" || lost.ActualID != "" {
+					t.Fatalf("attempt %d: SessionLostError = %+v", attempt, lost)
+				}
+			}
+			for _, m := range rpc.methods() {
+				if m == "thread/start" || m == "turn/start" {
+					t.Fatalf("methods = %v: a lost resume must not start a thread or a turn", rpc.methods())
+				}
+			}
+			if session.ThreadID() != "" {
+				t.Fatalf("ThreadID = %q after a failed resume", session.ThreadID())
+			}
+		})
+	}
+}
+
+func TestCodexAppServerSessionResumeOtherFailureIsNotSessionLost(t *testing.T) {
+	rpc := &recordingRPC{errs: map[string]error{
+		"thread/resume": &agentsessions.JsonRpcError{Code: -32603, Message: "internal error"},
+	}}
+	var session CodexAppServerSession
+	err := session.SendTurn(context.Background(), rpc, "hello", CodexAppServerOptions{ResumeThreadID: "thread-x"})
+	if err == nil || errors.Is(err, provider.ErrProviderSessionLost) {
+		t.Fatalf("err = %v, want a non-session-lost error", err)
+	}
+	var rpcErr *agentsessions.JsonRpcError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != -32603 {
+		t.Fatalf("err = %v, want the rpc error preserved", err)
+	}
+	if got, want := rpc.methods(), []string{"initialize", "thread/resume"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("methods = %v, want %v", got, want)
+	}
+}
+
+func TestCodexAppServerSessionResumeIntoDifferentThreadIsSessionLost(t *testing.T) {
+	rpc := &recordingRPC{responses: map[string]json.RawMessage{
+		"thread/resume": json.RawMessage(`{"thread":{"id":"thread-other"}}`),
+	}}
+	var session CodexAppServerSession
+	err := session.SendTurn(context.Background(), rpc, "hello", CodexAppServerOptions{ResumeThreadID: "thread-asked"})
+	var lost *agentsessions.SessionLostError
+	if !errors.As(err, &lost) || lost.RequestedID != "thread-asked" || lost.ActualID != "thread-other" {
+		t.Fatalf("err = %v, want SessionLostError{thread-asked, thread-other}", err)
+	}
+	if !errors.Is(err, provider.ErrProviderSessionLost) || !errors.Is(err, ErrCodexThreadMismatch) {
+		t.Fatalf("err = %v, want ErrProviderSessionLost and ErrCodexThreadMismatch", err)
+	}
+	if session.ThreadID() != "" {
+		t.Fatalf("ThreadID = %q, want the mismatched thread left unbound", session.ThreadID())
+	}
+}
+
+// ResumeThreadID only matters until a thread is bound: after Reset the caller
+// that clears it gets a fresh thread, and a caller that keeps passing it on a
+// bound session keeps its thread.
+func TestCodexAppServerSessionResumeOnlyBindsOnce(t *testing.T) {
+	rpc := &recordingRPC{responses: map[string]json.RawMessage{
+		"thread/start": json.RawMessage(`{"thread":{"id":"thread-new"}}`),
+	}}
+	var session CodexAppServerSession
+	if err := session.SendTurn(context.Background(), rpc, "one", CodexAppServerOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SendTurn(context.Background(), rpc, "two", CodexAppServerOptions{ResumeThreadID: "thread-elsewhere"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := rpc.methods(), []string{"initialize", "thread/start", "turn/start", "turn/start"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("methods = %v, want %v", got, want)
+	}
+	if session.ThreadID() != "thread-new" {
+		t.Fatalf("ThreadID = %q", session.ThreadID())
+	}
+}
+
 type captureSender struct{ last []byte }
 
 func (c *captureSender) SendInput(_ context.Context, data []byte) error {
@@ -140,10 +263,14 @@ type rpcCall struct {
 type recordingRPC struct {
 	calls     []rpcCall
 	responses map[string]json.RawMessage
+	errs      map[string]error
 }
 
 func (r *recordingRPC) Call(_ context.Context, method string, params any) (json.RawMessage, error) {
 	r.calls = append(r.calls, rpcCall{method: method, params: params})
+	if err := r.errs[method]; err != nil {
+		return nil, err
+	}
 	if res := r.responses[method]; len(res) > 0 {
 		return res, nil
 	}
