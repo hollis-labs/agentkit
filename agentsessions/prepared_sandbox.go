@@ -76,9 +76,16 @@ func applyStartOptions(opts *StartOptions, prepared *agentlaunch.PreparedExecuti
 	// child runs with an explicit empty environment, not the parent process
 	// environment inherited through os/exec defaults.
 	opts.Env = envVarsFromPrepared(bindings.Env)
-	if len(bindings.Argv) > 1 {
+	switch {
+	case bindings.Launch != nil:
+		// The template owns the provider argv and the launch's own flags;
+		// Argv is only its first turn. Copying Argv[1:] into ExtraArgs is
+		// what appended the provider argv a second time after BuildArgs.
+		opts.Launch = bindings.Launch
+		opts.ExtraArgs = nil
+	case len(bindings.Argv) > 1:
 		opts.ExtraArgs = append([]string(nil), bindings.Argv[1:]...)
-	} else {
+	default:
 		opts.ExtraArgs = nil
 	}
 	if prepared.Materialization != nil {

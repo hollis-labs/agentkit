@@ -39,10 +39,14 @@
 //     Applied last, so an overlay entry wins over both provider files
 //     and native files at the same path.
 //
-// After file planting, Plant rewires the PreparedLaunch in place:
-// BootDirSpec.EnvAmendments are merged into PreparedLaunch.Env,
-// BootDirSpec.ProjectDirArg is appended to PreparedLaunch.Argv, and
-// PreparedLaunch.Workdir is set per BootDirSpec.CwdPreference.
+// After file planting, Plant rewires the PreparedLaunch in place: the
+// provider's environment is merged into PreparedLaunch.Env, PreparedLaunch.Workdir
+// is set to the provider's working directory, and PreparedLaunch.Launch is set
+// to the provider's launch convention (a TurnTemplate) with the launch's own
+// flags at its extra-argument slot. PreparedLaunch.Argv is that template's first
+// turn. Runtimes resolve every turn from Launch, so each turn carries its own
+// prompt and resume id. A legacy BootDirSpec provider has no template; its
+// ProjectDirArg and the launch's flags are appended to Argv.
 //
 // # Relationship to go-agent-sessions
 //

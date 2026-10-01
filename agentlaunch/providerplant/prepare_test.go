@@ -3,6 +3,7 @@ package providerplant
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,10 +64,10 @@ func TestPrepareAndPlant_WithPlantOption(t *testing.T) {
 
 // The projected Claude argv carries --add-dir <project> itself
 // (go-providers v0.31.0); providerplant appends nothing, so it appears
-// exactly once. Note: DefaultResolver builds a print-mode ClaudeAdapter for
-// every Claude mode today, so all three modes below project the print argv;
-// what this pins is the absence of a second --add-dir, not per-mode argv.
-// That resolver gap is CW-20260930-0134's.
+// exactly once, in every mode. DefaultResolver builds each mode's own Claude
+// adapter, so the argv differs by mode: print carries the boot prompt after
+// -p, streaming-stdio carries no prompt (turns arrive on stdin) and the TUI no
+// print flags at all.
 func TestPrepareExecution_ClaudeProjectDirOnce(t *testing.T) {
 	isolateHome(t)
 	for _, mode := range []runtimes.Mode{runtimes.ModeStreamingStdio, runtimes.ModeSubprocessPerTurn, runtimes.ModePTY} {
@@ -92,12 +93,30 @@ func TestPrepareExecution_ClaudeProjectDirOnce(t *testing.T) {
 		if n != 1 {
 			t.Errorf("%s: --add-dir appears %d times, want 1: %v", mode, n, argv)
 		}
+		switch mode {
+		case runtimes.ModeStreamingStdio:
+			if !slices.Contains(argv, "--input-format") || slices.Contains(argv, prepared.BootContent) && prepared.BootContent != "" {
+				t.Errorf("%s: want stream-json input and no boot prompt in argv: %v", mode, argv)
+			}
+		case runtimes.ModePTY:
+			if slices.Contains(argv, "-p") {
+				t.Errorf("%s: the TUI takes no -p: %v", mode, argv)
+			}
+		case runtimes.ModeSubprocessPerTurn:
+			if i := slices.Index(argv, "-p"); i < 0 || slices.Contains(argv, "--input-format") {
+				t.Errorf("%s: want print-mode -p <prompt>: %v", mode, argv)
+			}
+		}
+		if exec.Bindings.Launch == nil || exec.Bindings.Launch.Convention.Mode != mode {
+			t.Errorf("%s: bindings carry no launch template for the mode: %+v", mode, exec.Bindings.Launch)
+		}
 	}
 }
 
-// Provider.Flags and Injection.Args follow the projected argv, which can end
-// in a variadic flag (Claude's --add-dir): a positional first would be
-// swallowed, so it is refused. A leading option is fine.
+// Provider.Flags and Injection.Args go at the convention's extra-argument
+// slot, before Claude's variadic --add-dir: a positional first would be read
+// as part of the prompt or as a directory, so it is refused. A leading option
+// is fine.
 func TestPrepareExecution_NoPositionalAfterProjection(t *testing.T) {
 	isolateHome(t)
 	positional := compiledWith(t, "claude", runtimes.ModeStreamingStdio, agentlaunch.InjectionSpec{Args: []string{"stray-positional"}})
@@ -118,7 +137,11 @@ func TestPrepareExecution_NoPositionalAfterProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareExecution with a leading option: %v", err)
 	}
-	if argv := exec.Bindings.Argv; argv[len(argv)-2] != "--model" || argv[len(argv)-1] != "sonnet" {
-		t.Errorf("injection args not appended last: %v", argv)
+	argv := exec.Bindings.Argv
+	if m, add := slices.Index(argv, "--model"), slices.Index(argv, "--add-dir"); m < 0 || argv[m+1] != "sonnet" || add < m {
+		t.Errorf("injection args not at the extra-argument slot before --add-dir: %v", argv)
+	}
+	if got := exec.Bindings.Launch.ExtraArgs; !slices.Equal(got, []string{"--model", "sonnet"}) {
+		t.Errorf("launch template extra args = %v", got)
 	}
 }

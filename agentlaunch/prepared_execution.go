@@ -103,6 +103,9 @@ type PreparedExecution struct {
 	Effects         []RuntimeEffect                   `yaml:"effects,omitempty" json:"effects,omitempty"`
 	Diagnostics     []CapabilityDiagnostic            `yaml:"diagnostics,omitempty" json:"diagnostics,omitempty"`
 	Legacy          LegacyCompatibility               `yaml:"legacy,omitempty" json:"legacy,omitempty"`
+	// Boot is how the boot prompt reaches the agent, from the PreparedLaunch
+	// the execution was prepared from.
+	Boot BootDelivery `yaml:"boot,omitempty" json:"boot,omitempty"`
 }
 
 func (p PreparedExecution) Validate() error {
@@ -115,8 +118,13 @@ func (p PreparedExecution) Validate() error {
 	return nil
 }
 
+// ExecutionBindings are a prepared launch's spawn bindings. Argv is the full
+// first-turn argv, binary first. When Launch is set, a runtime resolves each
+// turn's argv from it rather than reusing Argv; to add flags to every turn,
+// append to Launch.ExtraArgs, not to Argv.
 type ExecutionBindings struct {
 	Argv            []string          `yaml:"argv" json:"argv"`
+	Launch          *TurnTemplate     `yaml:"launch,omitempty" json:"launch,omitempty"`
 	Env             map[string]EnvVar `yaml:"env,omitempty" json:"env,omitempty"`
 	CWD             string            `yaml:"cwd" json:"cwd"`
 	ConfigRoot      string            `yaml:"config_root,omitempty" json:"config_root,omitempty"`

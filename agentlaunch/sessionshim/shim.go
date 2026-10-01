@@ -29,10 +29,13 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+
 	"github.com/hollis-labs/agentkit/agentsessions"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/providerplant"
+	"github.com/hollis-labs/agentkit/agentruntime/turn"
 )
 
 // ErrNilPrepared is returned by ToSessionLaunch when the prepared argument is
@@ -52,8 +55,9 @@ type SessionLaunch struct {
 	// PreparedLaunch.Argv[0].
 	Binary string
 
-	// Options is the StartOptions for agentsessions Manager.Start.
-	// StartOptions.ExtraArgs carries PreparedLaunch.Argv[1:].
+	// Options is the StartOptions for agentsessions Manager.Start. With a
+	// launch template, StartOptions.Launch carries it and ExtraArgs is
+	// empty; otherwise ExtraArgs carries PreparedLaunch.Argv[1:].
 	Options agentsessions.StartOptions
 }
 
@@ -63,7 +67,11 @@ type SessionLaunch struct {
 // Field mapping:
 //
 //   - Binary              ← Argv[0]
-//   - Options.ExtraArgs   ← Argv[1:]
+//   - Options.Launch      ← Launch, when Plant projected a launch template:
+//     the runtime resolves each turn's argv from it
+//   - Options.ExtraArgs   ← Argv[1:], only when there is no template (Argv
+//     is the template's first turn; appending it after the adapter's
+//     BuildArgs doubled the provider argv)
 //   - Options.Workdir     ← Workdir
 //   - Options.WorkspaceDir← WorkspaceDir
 //   - Options.Env         ← Env, flattened to sorted "K=V" entries
@@ -72,6 +80,9 @@ type SessionLaunch struct {
 //   - Options.BootMode    ← BootMode
 //   - Options.PlantContext← providerplant.PlantContextFor(prepared)
 //   - Options.AutoPlantBootDir stays false (bootdir already planted)
+//
+// A streaming-stdio launch takes its boot prompt as its first stdin turn; see
+// deliverStreamingBoot.
 //
 // The prepared launch must pass PreparedLaunch.Validate (non-nil
 // compiled plan, planted bootdir, workspace dir, non-empty argv).
@@ -83,23 +94,25 @@ func ToSessionLaunch(prepared *agentlaunch.PreparedLaunch) (SessionLaunch, error
 		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
 	}
 
-	extraArgs := append([]string(nil), prepared.Argv[1:]...)
-
-	return SessionLaunch{
-		Binary: prepared.Argv[0],
-		Options: agentsessions.StartOptions{
-			Workdir:      prepared.Workdir,
-			WorkspaceDir: prepared.WorkspaceDir,
-			Env:          envKV(prepared.Env),
-			ExtraArgs:    extraArgs,
-			BootPrompt:   prepared.BootPrompt,
-			BootContent:  prepared.BootContent,
-			BootMode:     prepared.BootMode,
-			PlantContext: providerplant.PlantContextFor(prepared),
-			// AutoPlantBootDir intentionally false — providerplant.Plant
-			// already materialized the bootdir.
-		},
-	}, nil
+	opts := agentsessions.StartOptions{
+		Workdir:      prepared.Workdir,
+		WorkspaceDir: prepared.WorkspaceDir,
+		Env:          envKV(prepared.Env),
+		Launch:       prepared.Launch,
+		BootPrompt:   prepared.BootPrompt,
+		BootContent:  prepared.BootContent,
+		BootMode:     prepared.BootMode,
+		PlantContext: providerplant.PlantContextFor(prepared),
+		// AutoPlantBootDir intentionally false — providerplant.Plant
+		// already materialized the bootdir.
+	}
+	if prepared.Launch == nil {
+		opts.ExtraArgs = append([]string(nil), prepared.Argv[1:]...)
+	}
+	if err := deliverStreamingBoot(&opts, prepared.Compiled.Plan.Runtime); err != nil {
+		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
+	}
+	return SessionLaunch{Binary: prepared.Argv[0], Options: opts}, nil
 }
 
 // ToSessionLaunchFromPreparedExecution converts the shared M12
@@ -113,19 +126,57 @@ func ToSessionLaunchFromPreparedExecution(prepared *agentlaunch.PreparedExecutio
 	if err := prepared.Validate(); err != nil {
 		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
 	}
-	return SessionLaunch{
-		Binary: prepared.Bindings.Argv[0],
-		Options: agentsessions.StartOptions{
-			Workdir:           prepared.Bindings.CWD,
-			WorkspaceDir:      prepared.Roots.StateRoot,
-			Env:               preparedEnvKV(prepared.Bindings.Env),
-			ExtraArgs:         append([]string(nil), prepared.Bindings.Argv[1:]...),
-			PreparedExecution: prepared,
-			// AutoPlantBootDir intentionally false — PreparedExecution
-			// already carries materialization ownership when files have
-			// been planted.
-		},
-	}, nil
+	opts := agentsessions.StartOptions{
+		Workdir:           prepared.Bindings.CWD,
+		WorkspaceDir:      prepared.Roots.StateRoot,
+		Env:               preparedEnvKV(prepared.Bindings.Env),
+		Launch:            prepared.Bindings.Launch,
+		BootPrompt:        prepared.Boot.Prompt,
+		BootContent:       prepared.Boot.Content,
+		BootMode:          prepared.Boot.Mode,
+		PreparedExecution: prepared,
+		// AutoPlantBootDir intentionally false — PreparedExecution
+		// already carries materialization ownership when files have
+		// been planted.
+	}
+	var mode runtimes.Mode
+	if prepared.Bindings.Launch != nil {
+		mode = prepared.Bindings.Launch.Convention.Mode
+	} else {
+		opts.ExtraArgs = append([]string(nil), prepared.Bindings.Argv[1:]...)
+	}
+	if err := deliverStreamingBoot(&opts, mode); err != nil {
+		return SessionLaunch{}, fmt.Errorf("agentlaunch/sessionshim: %w", err)
+	}
+	return SessionLaunch{Binary: prepared.Bindings.Argv[0], Options: opts}, nil
+}
+
+// deliverStreamingBoot gives a streaming-stdio launch its boot prompt. Claude
+// in streaming-stdio mode takes every turn, the first included, as a
+// stream-json frame on stdin, and its argv carries no prompt, so the boot
+// prompt (BootContent, else BootPrompt) becomes the auto-fired first turn,
+// framed. BootMode and BootPrompt are cleared so the session does not also
+// write the unframed prompt to stdin. BootMode "none" opts out.
+func deliverStreamingBoot(opts *agentsessions.StartOptions, mode runtimes.Mode) error {
+	if mode != runtimes.ModeStreamingStdio || opts.BootMode == agentlaunch.BootModeNone {
+		return nil
+	}
+	text := opts.BootContent
+	if text == "" {
+		text = opts.BootPrompt
+	}
+	if text == "" {
+		return nil
+	}
+	payload, err := turn.Frame(text, turn.Options{Runtime: runtimes.ModeStreamingStdio})
+	if err != nil {
+		return err
+	}
+	opts.AutoFireFirstTurn = true
+	opts.FirstTurnPayload = payload
+	opts.BootMode = ""
+	opts.BootPrompt = ""
+	return nil
 }
 
 // envKV flattens a map into the sorted "KEY=VALUE" slice form

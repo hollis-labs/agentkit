@@ -367,6 +367,14 @@ type StartOptions struct {
 	// of being silently ignored.
 	PreparedExecution *agentlaunch.PreparedExecution
 
+	// Launch is a prepared launch's argv template (PreparedLaunch.Launch,
+	// or PreparedExecution.Bindings.Launch, which Start copies here). When
+	// set, every spawn's argv is the template resolved for that turn —
+	// prompt, system prompt and resume id — with ExtraArgs at the
+	// convention's extra-argument slot, and the adapter's BuildArgs is not
+	// called. The adapter still supplies the binary (Detect) and parsing.
+	Launch *agentlaunch.TurnTemplate
+
 	// SandboxPolicy is the resolved go-sandbox access policy applied at the
 	// process-spawn boundary. It is preferred over Profile. Passing both is
 	// rejected so callers do not accidentally mix the shared policy model
@@ -618,7 +626,8 @@ type StartOptions struct {
 	OnBootDirPlanted func(path string)
 
 	// ExtraArgs, when non-nil, is appended to the runtime's argv after
-	// adapter.BuildArgs(...). Used internally by AutoPlantBootDir to thread
+	// adapter.BuildArgs(...), or, with Launch set, placed at the launch
+	// convention's extra-argument slot. Used internally by AutoPlantBootDir to thread
 	// BootDirSpec.ProjectDirArg through to the spawn (e.g. claude's
 	// `--add-dir <projectDir>`) without changing the adapter contract.
 	// Consumers may also set it directly when they need to splice
