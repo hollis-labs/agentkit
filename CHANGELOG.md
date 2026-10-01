@@ -4,6 +4,36 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.11.0 — 2026-10-01
+
+Minor, additive. No existing API changes; adds a dependency on go-permission
+v0.1.0.
+
+### Added
+
+- **Codex thread resume.** `turn.CodexAppServerOptions.ResumeThreadID` makes a
+  Codex app-server session bind its thread with `thread/resume` (thread
+  metadata only, `excludeTurns`) instead of always sending `thread/start`. A
+  failed resume is returned as an error and never falls back to a fresh
+  thread. When Codex no longer has the thread, the error is an
+  `*agentsessions.SessionLostError` with `RequestedID`
+  (`errors.Is(err, provider.ErrProviderSessionLost)` holds). A resume answered
+  with a different thread is a `SessionLostError` carrying `ActualID`, with
+  the new `turn.ErrCodexThreadMismatch` as its `Err`.
+- **`turn.CodexApprovalResponder`** answers Codex app-server approval requests
+  from a go-permission `Mode`, with no human in the loop. `default` approves
+  MCP tool calls and declines sandbox escalations (commands, out-of-sandbox
+  file changes); `accept-edits` also approves file changes; `plan` declines
+  all three; `yolo` approves all three. Any request it cannot decide for a
+  human gets a JSON-RPC error in every mode. `Hook()` plugs into
+  `StartOptions.JsonRpcRequestHook`; `Decide()` returns the outcome for
+  callers that also report it.
+
+### Changed
+
+- New dependency: `github.com/hollis-labs/go-permission` v0.1.0.
+- `agentruntime/turn` now imports `agentsessions`.
+
 ## v0.10.0 — 2026-09-30
 
 Minor, additive. No existing API changes; go-sandbox is now v0.4.0.
