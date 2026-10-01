@@ -4,6 +4,22 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.11.2 — 2026-10-01
+
+Patch: serve-http no longer corrupts multi-line SSE event data
+(CW-20260930-0052).
+
+### Fixed
+
+- **serve-http joins multi-line `data:` fields with a newline.** The `/event`
+  reader concatenated an event's `data:` lines with no separator, so
+  `data: a` + `data: b` arrived as `ab` instead of `a\nb`, silently. It now
+  follows the WHATWG event-stream rules for the data field, as go-ssekit's
+  `Read` does: lines join with `\n`, an empty `data:` line or a bare `data`
+  field keeps its newline, other fields and comments are ignored, an event with
+  empty data is not dispatched, and an event the stream ends before terminating
+  is dropped.
+
 ## v0.11.1 — 2026-10-01
 
 Patch: a child's final output is no longer lost when it exits quickly

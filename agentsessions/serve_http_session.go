@@ -433,23 +433,40 @@ func (s *serveHTTPSession) runEventStream() {
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	scanner := bufio.NewScanner(resp.Body)
+	readSSEData(resp.Body, s.handleSSEData)
+}
+
+// readSSEData calls emit with the data of each event in an SSE stream.
+// Per the WHATWG event-stream format, an event's data lines join with
+// "\n"; an event whose data is empty is not dispatched, and one the
+// stream ends before terminating is dropped.
+func readSSEData(r io.Reader, emit func([]byte)) {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var data bytes.Buffer
+	var (
+		data    bytes.Buffer
+		hasData bool
+	)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			if data.Len() > 0 {
-				s.handleSSEData(data.Bytes())
-				data.Reset()
+				emit(data.Bytes())
 			}
+			data.Reset()
+			hasData = false
 			continue
 		}
-		if strings.HasPrefix(line, "data:") {
-			chunk := strings.TrimPrefix(line, "data:")
-			chunk = strings.TrimPrefix(chunk, " ")
-			data.WriteString(chunk)
+		chunk, ok := strings.CutPrefix(line, "data")
+		if !ok || (chunk != "" && chunk[0] != ':') {
+			continue // another field, or a comment
 		}
+		chunk = strings.TrimPrefix(strings.TrimPrefix(chunk, ":"), " ")
+		if hasData {
+			data.WriteByte('\n')
+		}
+		data.WriteString(chunk)
+		hasData = true
 	}
 }
 
