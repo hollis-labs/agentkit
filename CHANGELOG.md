@@ -4,6 +4,39 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.12.3 — 2026-10-01
+
+Patch on the v0.12 line (CW-20261001-0102). Since go-providers v0.34.1 an
+argv with a prompt ends in `-- <prompt>`, and agentkit v0.12.x appended launch
+flags after it. Everything after `--` is a positional, so the agent received
+those flags as prompt text. Nothing else changes; it is a drop-in patch for
+apps on agentkit v0.12.x with go-providers v0.34.1 or later. v0.13.0's launch
+template path was already correct. The non-template `ExtraArgs` path on main
+is fixed separately.
+
+### Fixed
+
+- **Prepared launches: `Provider.Flags` and `Injection.Args` precede `--`.**
+  `providerplant.PrepareExecution` now inserts them immediately before the
+  projected argv's first `--`, and appends them when there is none, as
+  before. Previously they followed `-- <boot prompt>`. As before, the first of
+  them must be an option. A `--` among them is now refused as well, since it
+  would end option parsing early. Both cases return
+  `ErrPositionalAfterProjection`.
+- **Sessions: `StartOptions.ExtraArgs` precede `--`.** This covers every
+  runtime: the subprocess-per-turn `buildArgs`, pty, streaming-stdio,
+  jsonrpc-stdio and serve-http. A caller's `ExtraArgs`, and
+  `AutoPlantBootDir`'s project-dir argument (Claude's `--add-dir`), used to
+  follow `-- <prompt>` on `claude -p`, `codex exec` and `opencode run` turns.
+  An argv without a `--` is unchanged. An `ExtraArgs` that carries its own
+  `--` is appended unchanged, as before.
+
+### Changed
+
+- Builds against go-providers v0.34.1 (was v0.32.0). This is the version
+  whose argv shape the fix is for, and the one every affected app already
+  resolves. Its own dependencies are unchanged.
+
 ## v0.12.2 — 2026-10-01
 
 Patch (CW-20260930-0134, deferred from the agentkit#7 review).
