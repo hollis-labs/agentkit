@@ -10,6 +10,7 @@ import (
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	llmtypes "github.com/hollis-labs/go-llm-types"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/provider/events"
 	"github.com/hollis-labs/go-providers/providertest"
 )
 
@@ -69,12 +70,23 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 	)
 	var stderrSeen strings.Builder
 	var ids []string
+	var lostEvents []events.SessionLost
+	var fanout syncBuffer
 	eventCh := make(chan llmtypes.StreamEvent, 16)
 	sess := startClaudePrint(t, fake, StartOptions{
 		SessionIDPreset: lostClaudeID,
 		Stderr:          &stderrSeen,
 		EventFanout:     eventCh,
+		Fanout:          &fanout,
 		OnSessionID:     func(id string) { ids = append(ids, id) },
+		TypedEventCallback: func(ev events.Event) {
+			if lost, ok := ev.(events.SessionLost); ok {
+				lostEvents = append(lostEvents, lost)
+			}
+		},
+		OnProviderSessionLost: func(string, string, string) {
+			t.Error("OnProviderSessionLost reports a turn that ran on in a new session; this one failed")
+		},
 	})
 	ider := sess.(SessionIDer)
 
@@ -96,9 +108,15 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 	if !strings.Contains(stderrSeen.String(), "No conversation found") {
 		t.Errorf("caller's Stderr did not receive the turn's stderr: %q", stderrSeen.String())
 	}
-	// Claude ends the turn with its own error result, so turn N has one
-	// error event, Claude's. It does not name the lost session yet; that is
-	// CW-20261001-0184.
+	// Claude ends the turn with its own error result, which says only that
+	// it failed; the event stream also carries the lost session, once, as
+	// the typed SessionLost and the Fanout marker (CW-20261001-0184).
+	if len(lostEvents) != 1 || lostEvents[0].RequestedID != lostClaudeID || lostEvents[0].ActualID != "" || !strings.Contains(lostEvents[0].Reason, "not found") {
+		t.Errorf("SessionLost events = %+v; want one for %s, with no actual id", lostEvents, lostClaudeID)
+	}
+	if !strings.Contains(fanout.String(), "[session_lost] requested="+lostClaudeID) {
+		t.Errorf("Fanout has no [session_lost] marker: %q", fanout.String())
+	}
 	var errorEvents int
 	for _, ev := range drainEvents(eventCh) {
 		if ev.Type == llmtypes.EventError {
@@ -130,6 +148,9 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 	if len(ids) != 1 || ids[0] != fresh {
 		t.Errorf("OnSessionID calls = %q; want [%s]", ids, fresh)
 	}
+	if len(lostEvents) != 1 {
+		t.Errorf("turn N+1 reported a lost session too: %+v", lostEvents)
+	}
 }
 
 // TestAdapterRuntime_SessionLost_OtherFailuresKeepID: a resume turn that
@@ -139,7 +160,15 @@ func TestAdapterRuntime_SessionLost_DropsIDAndReturnsTypedError(t *testing.T) {
 func TestAdapterRuntime_SessionLost_OtherFailuresKeepID(t *testing.T) {
 	stderr := strings.TrimSpace(string(providertest.ReadFixture(t, "claude/print_error_unknown_model.stderr")))
 	fake := providertest.New(t, runtimes.Claude, providertest.Script(providertest.Stderr(stderr), providertest.Exit(1)))
-	sess := startClaudePrint(t, fake, StartOptions{SessionIDPreset: "ses_live"})
+	var lost int
+	sess := startClaudePrint(t, fake, StartOptions{
+		SessionIDPreset: "ses_live",
+		TypedEventCallback: func(ev events.Event) {
+			if _, ok := ev.(events.SessionLost); ok {
+				lost++
+			}
+		},
+	})
 
 	err := sess.SendInput(context.Background(), []byte("x"))
 	if err == nil || errors.Is(err, provider.ErrProviderSessionLost) {
@@ -147,6 +176,9 @@ func TestAdapterRuntime_SessionLost_OtherFailuresKeepID(t *testing.T) {
 	}
 	if got := sess.(SessionIDer).ProviderSessionID(); got != "ses_live" {
 		t.Errorf("stored id = %q; want ses_live kept", got)
+	}
+	if lost != 0 {
+		t.Errorf("a failure that is not a lost session reported %d SessionLost events", lost)
 	}
 }
 
