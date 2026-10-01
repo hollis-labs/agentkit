@@ -147,9 +147,13 @@ func Prepare(ctx context.Context, compiled *agentlaunch.CompiledLaunch, opts ...
 	// 7. Compose argv: [binary, provider.flags..., injection.args...].
 	argv := composeArgv(plan, desc)
 
-	// 8. PlantContext — fill in the fields we know at this layer.
+	// 8. PlantContext — fill in the fields we know at this layer. The
+	//    plan's MCPSpec rides through so the go-providers renderers plant
+	//    it; apps no longer hand-set the plant's MCP fields.
 	plantCtx := agentlaunch.PreparedPlantContext{
-		AgentName: plan.Agent.Name,
+		AgentName:      plan.Agent.Name,
+		MCPLoopbackURL: plan.MCP.LoopbackURL,
+		MCPServers:     append([]agentlaunch.MCPServerSpec(nil), plan.MCP.Servers...),
 	}
 	if plantCtx.AgentName == "" {
 		plantCtx.AgentName = plan.Agent.ID

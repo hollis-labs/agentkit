@@ -119,6 +119,10 @@ type PreparedPlantContext struct {
 
 	// SelfMCPEnv is the environment forwarded to the helper subprocess.
 	SelfMCPEnv map[string]string `yaml:"self_mcp_env,omitempty" json:"self_mcp_env,omitempty"`
+
+	// MCPServers mirrors MCPSpec.Servers: the app's own MCP servers, stdio
+	// or HTTP, planted beside the loopback and self-MCP entries.
+	MCPServers []MCPServerSpec `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
 }
 
 // Validate runs sanity checks on the materialized state. A

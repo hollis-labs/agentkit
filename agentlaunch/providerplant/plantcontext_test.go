@@ -66,3 +66,31 @@ func TestPlantContextFor_Nil(t *testing.T) {
 		t.Errorf("PlantContextFor(nil) = %+v, want zero value", pc)
 	}
 }
+
+// CW-20260930-0136 W4a: MCP servers reach go-providers' PlantContext, URL as
+// HTTPURL and env flattened and sorted.
+func TestPlantContextFor_MCPServers(t *testing.T) {
+	prepared := &agentlaunch.PreparedLaunch{PlantContext: agentlaunch.PreparedPlantContext{
+		MCPLoopbackURL: "http://127.0.0.1:7000/mcp",
+		MCPServers: []agentlaunch.MCPServerSpec{
+			{Name: "hadron", URL: "http://127.0.0.1:7777/mcp"},
+			{Name: "nanite", Command: "/bin/nanite", Args: []string{"mcp"}, Env: map[string]string{"B": "2", "A": "1"}},
+		},
+	}}
+	pc := PlantContextFor(prepared)
+	if pc.MCPLoopbackURL != "http://127.0.0.1:7000/mcp" {
+		t.Errorf("MCPLoopbackURL = %q", pc.MCPLoopbackURL)
+	}
+	if len(pc.MCPServers) != 2 {
+		t.Fatalf("MCPServers = %+v", pc.MCPServers)
+	}
+	if h := pc.MCPServers[0]; h.Name != "hadron" || h.HTTPURL != "http://127.0.0.1:7777/mcp" || h.Command != "" {
+		t.Errorf("http server = %+v", h)
+	}
+	if n := pc.MCPServers[1]; n.Command != "/bin/nanite" || !slices.Equal(n.Args, []string{"mcp"}) || !slices.Equal(n.Env, []string{"A=1", "B=2"}) {
+		t.Errorf("stdio server = %+v", n)
+	}
+	if PlantContextFor(&agentlaunch.PreparedLaunch{}).MCPServers != nil {
+		t.Error("no servers should plant nil, keeping configs byte-identical")
+	}
+}

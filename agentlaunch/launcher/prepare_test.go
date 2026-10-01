@@ -229,3 +229,36 @@ func TestPrepareNilCompiledErrors(t *testing.T) {
 		t.Fatalf("Prepare(nil) err = %v, want errors.Is ErrCompiledMissingPlan", err)
 	}
 }
+
+// CW-20260930-0136 item 1: the plan's MCPSpec rides into the prepared plant
+// context, so apps stop hand-setting the plant's MCP fields.
+func TestPrepareCarriesMCPSpecIntoPlantContext(t *testing.T) {
+	plan := validPlanForPrepare(t)
+	plan.MCP = agentlaunch.MCPSpec{
+		LoopbackURL: "http://127.0.0.1:7000/mcp",
+		Servers: []agentlaunch.MCPServerSpec{
+			{Name: "hadron", URL: "http://127.0.0.1:7777/mcp"},
+			{Name: "nanite", Command: "nanite", Args: []string{"mcp"}, Env: map[string]string{"TOKEN": "x"}},
+		},
+	}
+	compiled, err := Compile(context.Background(), plan, WithNow(func() time.Time { return fixedTime }))
+	if err != nil {
+		t.Fatalf("Compile = %v", err)
+	}
+	prepared, err := Prepare(context.Background(), compiled)
+	if err != nil {
+		t.Fatalf("Prepare = %v", err)
+	}
+	pc := prepared.PlantContext
+	if pc.MCPLoopbackURL != "http://127.0.0.1:7000/mcp" {
+		t.Errorf("MCPLoopbackURL = %q", pc.MCPLoopbackURL)
+	}
+	if len(pc.MCPServers) != 2 || pc.MCPServers[0].URL != "http://127.0.0.1:7777/mcp" || pc.MCPServers[1].Command != "nanite" {
+		t.Errorf("MCPServers = %+v", pc.MCPServers)
+	}
+	// A copy, not an alias of the plan's slice.
+	plan.MCP.Servers[0].Name = "changed"
+	if pc.MCPServers[0].Name != "hadron" {
+		t.Error("prepared plant context aliases the plan's server slice")
+	}
+}

@@ -355,3 +355,39 @@ func TestPlant_NilCompiled(t *testing.T) {
 		t.Fatal("Plant with nil Compiled: expected error")
 	}
 }
+
+// CW-20260930-0136: one MCPSpec reaches every runtime's planted MCP config,
+// stdio and http, without the app rendering any of it. Planted through Plant
+// (the launcher's path), so the plant-context copy, the go-providers
+// renderers and the layout paths are all exercised together.
+func TestPlant_MCPServersReachEveryRuntimeConfig(t *testing.T) {
+	cases := []struct {
+		provider string
+		mode     runtimes.Mode
+		file     string
+	}{
+		{"claude", runtimes.ModePTY, ".mcp.json"},
+		{"codex", runtimes.ModeSubprocessPerTurn, "config.toml"},
+		{"opencode", runtimes.ModeSubprocessPerTurn, "opencode.json"},
+		{"antigravity", runtimes.ModeSubprocessPerTurn, ".agents/plugins/tether/mcp_config.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			isolateHome(t)
+			prepared := preparedFor(t, tc.provider, tc.mode)
+			prepared.PlantContext.MCPServers = []agentlaunch.MCPServerSpec{
+				{Name: "hadron", URL: "http://127.0.0.1:7777/mcp"},
+				{Name: "nanite", Command: "/bin/nanite", Args: []string{"mcp"}},
+			}
+			if err := Plant(context.Background(), prepared); err != nil {
+				t.Fatalf("plant: %v", err)
+			}
+			got := readFile(t, prepared.PlantedBootDir, tc.file)
+			for _, want := range []string{"hadron", "http://127.0.0.1:7777/mcp", "nanite", "/bin/nanite"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s missing %q:\n%s", tc.file, want, got)
+				}
+			}
+		})
+	}
+}
