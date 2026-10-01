@@ -30,6 +30,37 @@ func TestWithExtraArgs(t *testing.T) {
 	}
 }
 
+// splicingOnly hides an adapter's optional interfaces, ExtraArgsBuilder
+// among them.
+type splicingOnly struct{ provider.CLIAdapter }
+
+// adapterArgs places extras at the convention slot through
+// provider.ExtraArgsBuilder when the adapter has it, and splices them before
+// "--" when it does not, or when they carry their own "--" (CW-20261001-0197).
+func TestAdapterArgsPrefersTheConventionSlot(t *testing.T) {
+	codex := &provider.CodexAdapter{ProjectDir: "/p"}
+	extra := []string{"-s", "read-only"}
+	for _, c := range []struct {
+		name    string
+		adapter provider.CLIAdapter
+		extra   []string
+		want    []string
+	}{
+		{"builder: in front of resume", codex, extra,
+			[]string{"exec", "-s", "read-only", "--json", "--skip-git-repo-check", "--cd", "/p", "resume", "t1", "--", "hi"}},
+		{"no builder: spliced before --", splicingOnly{codex}, extra,
+			[]string{"exec", "--json", "--skip-git-repo-check", "--cd", "/p", "resume", "t1", "-s", "read-only", "--", "hi"}},
+		{"extra with its own --: appended", codex, []string{"-x", "--", "tail"},
+			[]string{"exec", "--json", "--skip-git-repo-check", "--cd", "/p", "resume", "t1", "--", "hi", "-x", "--", "tail"}},
+		{"no extra", codex, nil,
+			[]string{"exec", "--json", "--skip-git-repo-check", "--cd", "/p", "resume", "t1", "--", "hi"}},
+	} {
+		if got := adapterArgs(c.adapter, "hi", "", "t1", c.extra); !slices.Equal(got, c.want) {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+}
+
 // Since go-providers v0.34.1 claude -p's argv ends in "-- <prompt>". A
 // session's ExtraArgs (a caller's, or AutoPlantBootDir's --add-dir) used to be
 // appended after it and reached claude as prompt text (CW-20261001-0102).

@@ -166,7 +166,7 @@ func (r *adapterRuntime) Start(ctx context.Context, opts StartOptions) (Session,
 	if opts.Launch != nil && s.buildArgs != nil {
 		return nil, errors.New("agentsessions: AdapterRuntimeConfig.BuildArgs and a launch template (StartOptions.Launch) are mutually exclusive: the template owns every turn's argv")
 	}
-	launchArgs := false
+	launchArgs, adapterBuilt := false, false
 	if s.buildArgs == nil {
 		if opts.Launch != nil {
 			// A prepared launch's template gives each turn its own prompt
@@ -186,18 +186,25 @@ func (r *adapterRuntime) Start(ctx context.Context, opts StartOptions) (Session,
 			s.buildArgs = func(prompt, sessionID string) []string {
 				return sessionAdapter.BuildArgs(prompt, "", sessionID)
 			}
+			adapterBuilt = true
 		}
 	}
-	// ExtraArgs splice composes over whatever buildArgs is in use (caller-
-	// supplied or default). Captures len at Start; opts is value-copied
-	// into the session struct so post-Start mutation by the caller does
-	// not retroactively rewrite per-turn argv. A launch template has
-	// already placed them.
+	// ExtraArgs compose over whatever buildArgs is in use. Captures them at
+	// Start; opts is value-copied into the session struct so post-Start
+	// mutation by the caller does not retroactively rewrite per-turn argv.
+	// A launch template has already placed them; the adapter's own argv
+	// places them at its convention's slot when it can (adapterArgs); a
+	// caller-supplied BuildArgs gets them spliced before its "--".
 	if len(opts.ExtraArgs) > 0 && !launchArgs {
 		inner := s.buildArgs
 		extra := append([]string(nil), opts.ExtraArgs...)
 		s.buildArgs = func(prompt, sessionID string) []string {
 			return withExtraArgs(inner(prompt, sessionID), extra)
+		}
+		if adapterBuilt {
+			s.buildArgs = func(prompt, sessionID string) []string {
+				return adapterArgs(sessionAdapter, prompt, "", sessionID, extra)
+			}
 		}
 	}
 

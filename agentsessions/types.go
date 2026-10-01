@@ -661,11 +661,14 @@ type StartOptions struct {
 	// Added in v0.9.0.
 	OnBootDirPlanted func(path string)
 
-	// ExtraArgs, when non-nil, is spliced into the runtime's argv after
-	// adapter.BuildArgs(...)'s flags: before its "--" when it has one (a
-	// prompt follows it since go-providers v0.34.1), appended otherwise; an
-	// ExtraArgs that carries its own "--" is appended unchanged. With Launch
-	// set it is placed at the launch convention's extra-argument slot. Used internally by AutoPlantBootDir to thread
+	// ExtraArgs, when non-nil, is added to every turn's argv at the launch
+	// convention's extra-argument slot: by the Launch template when Launch
+	// is set, and otherwise by an adapter that implements
+	// provider.ExtraArgsBuilder (every go-providers adapter, v0.42.0 on).
+	// For any other adapter, or an ExtraArgs that carries its own "--", it is
+	// spliced into adapter.BuildArgs(...)'s output: before its "--" when it
+	// has one (a prompt follows it since go-providers v0.34.1), appended
+	// otherwise; one carrying its own "--" is appended unchanged. Used internally by AutoPlantBootDir to thread
 	// BootDirSpec.ProjectDirArg through to the spawn (e.g. claude's
 	// `--add-dir <projectDir>`) without changing the adapter contract.
 	// Consumers may also set it directly when they need to splice
@@ -673,13 +676,10 @@ type StartOptions struct {
 	// runtime does NOT do template substitution — pre-resolve any
 	// placeholders before passing the slice.
 	//
-	// On a codex exec session without Launch, turn 2 onward resumes the
-	// thread (`exec … resume <id> -- <prompt>`, go-providers v0.41.0), and
-	// ExtraArgs land after `resume <id>`. They must be ones codex accepts
-	// there: -c, -m, --dangerously-bypass-approvals-and-sandbox. Exec-only
-	// flags (-s, --cd, --add-dir) belong in the CodexAdapter's own
-	// ExtraArgs, or in a Launch template, which place them in front of the
-	// subcommand (CW-20261001-0197 tracks placing these there too).
+	// The slot matters for codex exec: from turn 2 the thread resumes
+	// (`exec … resume <id> -- <prompt>`), and codex takes exec options such
+	// as -s, --cd and --add-dir only in front of `resume`. The slot is there;
+	// a splice before "--" is not (CW-20261001-0197).
 	//
 	// Added in v0.9.0.
 	ExtraArgs []string
