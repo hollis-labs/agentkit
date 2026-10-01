@@ -4,6 +4,27 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.2 — 2026-10-01
+
+### Fixed
+
+- **A per-turn resume that fails because the provider lost the session now
+  says so in the event stream** (CW-20261001-0184).
+  - Before: `SendInput` returned `*SessionLostError`, but the turn's events
+    carried only the provider's own terminal error. For real Claude that is
+    an `error_during_execution` result with an empty message, so a consumer
+    of the event stream could not tell the session was lost.
+    go-agent-wrapper's `session.lost` never fired for Claude or OpenCode.
+  - Now the turn also emits the typed `events.SessionLost` (`RequestedID`
+    set, no `ActualID`) and the Fanout `[session_lost]` marker, once per
+    turn.
+  - Ordering: these follow the provider's terminal event, because the stderr
+    that classifies the turn is complete only after the process exits.
+  - `OnProviderSessionLost` stays as it was. It reports a turn that ran on in
+    a new session, which is Antigravity's case.
+  - Tested by replaying go-providers' live `claude/print_resume_unknown_id`
+    capture through the real `ClaudeAdapter`.
+
 ## v0.20.1 — 2026-10-01
 
 Follow-up to v0.20.0 (CW-20261001-0160).

@@ -404,6 +404,12 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	if err != nil && canClassify && stderrTail != nil && sessionID != "" && classifier.IsSessionLost(stderrTail.Bytes()) {
 		s.sessionID.CompareAndSwap(sessionID, "")
 		err = &SessionLostError{RequestedID: sessionID, Err: err}
+		// The provider's own terminal event for the turn (Claude's error
+		// result) says only that it failed; the event stream also needs to
+		// say why (CW-20261001-0184). It follows that terminal event: the
+		// stderr that classifies the turn is complete only once the process
+		// has exited.
+		s.announceSessionLost(sessionID, "", sessionLostFailedReason)
 	}
 	if err != nil && canClassifyAuth && stderrTail != nil && authClassifier.IsNotAuthenticated(stderrTail.Bytes()) {
 		err = fmt.Errorf("agentsessions: %w: %w", provider.ErrProviderNotAuthenticated, err)
@@ -554,6 +560,10 @@ func (s *adapterSession) ProviderSessionID() string {
 // sessionLostReason is the reason reported with a replaced session.
 const sessionLostReason = "requested provider session not found; the provider started a new session"
 
+// sessionLostFailedReason is the reason reported when a resume turn failed
+// because the provider no longer has the requested session.
+const sessionLostFailedReason = "requested provider session not found; the turn failed, and the next turn starts a new session"
+
 // reportSessionLost announces, once per turn, that a resume turn is running
 // in a new provider session: to OnProviderSessionLost, the typed-event
 // callback (events.SessionLost) and the byte Fanout, as a
@@ -563,15 +573,28 @@ func (s *adapterSession) reportSessionLost(requested, actual string) {
 	if s.turnSessionLost {
 		return
 	}
-	s.turnSessionLost = true
 	if s.opts.OnProviderSessionLost != nil {
 		s.opts.OnProviderSessionLost(requested, actual, sessionLostReason)
 	}
+	s.announceSessionLost(requested, actual, sessionLostReason)
+}
+
+// announceSessionLost puts a lost session in the turn's event stream, once
+// per turn: the typed events.SessionLost and the byte Fanout's
+// "[session_lost] ..." marker. A turn that failed because its session was
+// lost (SessionLostError) is announced here too, with no actual id; its
+// caller learns it from SendInput's error, so OnProviderSessionLost, which
+// reports a turn that ran on in a new session, is not called.
+func (s *adapterSession) announceSessionLost(requested, actual, reason string) {
+	if s.turnSessionLost {
+		return
+	}
+	s.turnSessionLost = true
 	if s.opts.TypedEventCallback != nil {
-		s.opts.TypedEventCallback(events.SessionLost{RequestedID: requested, ActualID: actual, Reason: sessionLostReason})
+		s.opts.TypedEventCallback(events.SessionLost{RequestedID: requested, ActualID: actual, Reason: reason})
 	}
 	if s.opts.Fanout != nil {
-		_, _ = fmt.Fprintf(s.opts.Fanout, "\n[session_lost] requested=%s actual=%s: %s\n", requested, actual, sessionLostReason)
+		_, _ = fmt.Fprintf(s.opts.Fanout, "\n[session_lost] requested=%s actual=%s: %s\n", requested, actual, reason)
 	}
 }
 
