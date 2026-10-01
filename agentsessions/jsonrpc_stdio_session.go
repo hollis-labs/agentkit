@@ -98,6 +98,7 @@ func (r *jsonRpcStdioRuntime) Start(ctx context.Context, opts StartOptions) (Ses
 		stopRequested: make(chan struct{}),
 		pending:       make(map[int64]chan jsonRpcResponse),
 	}
+	s.nextID.Store(callIDBase)
 	s.alive.Store(true)
 	s.state.Store(int32(LiveStateIdle))
 	// Pre-seed lastSessionID from preset so ProviderSessionID() returns
@@ -222,7 +223,7 @@ type jsonRpcStdioSession struct {
 	stopOnce      sync.Once
 	stopRequested chan struct{}
 
-	// JSON-RPC client state.
+	// JSON-RPC client state. Request ids start at callIDBase.
 	nextID  atomic.Int64
 	pendMu  sync.Mutex
 	pending map[int64]chan jsonRpcResponse
@@ -888,6 +889,13 @@ func (s *jsonRpcStdioSession) SendInput(_ context.Context, data []byte) error {
 	s.tickActivity()
 	return nil
 }
+
+// callIDBase is where the session's own request ids start. A host can also
+// drive the runtime with raw frames through SendInput, numbering them from 1
+// as JSON-RPC clients usually do (the wrapper's Codex hosts do); a session
+// Call (InterruptTurn's turn/interrupt) must not reuse an id the host has in
+// flight, or the two responses would be confused.
+const callIDBase = 1 << 32
 
 // Call sends a JSON-RPC 2.0 request, blocks on the matching response, and
 // returns the raw result envelope (or *JsonRpcError when the remote returns
