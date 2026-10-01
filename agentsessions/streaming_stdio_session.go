@@ -376,9 +376,10 @@ func (s *streamingStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteCl
 }
 
 func (s *streamingStdioSession) spawnReaderLegacy(stdout io.Reader) {
+	capture := s.currentStderrCapture() // this attempt's
 	go func() {
 		defer close(s.copyDone)
-		s.runReaderLoop(stdout)
+		s.runReaderLoop(stdout, capture)
 	}()
 }
 
@@ -387,7 +388,7 @@ func (s *streamingStdioSession) spawnReaderLegacy(stdout io.Reader) {
 // paths. Returns at EOF (typically because the child exited and the pipe
 // closed). A line too long to route is skipped and noted, never left in the
 // pipe; a read failure marks the session unusable and keeps draining.
-func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
+func (s *streamingStdioSession) runReaderLoop(stdout io.Reader, capture *stderrCapture) {
 	var sink io.Writer = s.logFile
 	if s.opts.Fanout != nil {
 		sink = io.MultiWriter(s.logFile, s.opts.Fanout)
@@ -410,9 +411,13 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 			for _, ev := range evs {
 				if ev.Type == llmtypes.EventSessionID && ev.SessionID != "" {
 					s.lastSessionID.Store(ev.SessionID)
+					capture.noteProgress()
 					if s.opts.OnSessionID != nil {
 						s.opts.OnSessionID(ev.SessionID)
 					}
+				}
+				if ev.Type == llmtypes.EventDone {
+					capture.noteProgress()
 				}
 				tryEventFanout(s.opts.EventFanout, ev)
 			}
@@ -481,13 +486,16 @@ func (s *streamingStdioSession) spawnWaiterLegacy(cmd *exec.Cmd, stdin io.WriteC
 		s.ioLock.Unlock()
 
 		_ = stdin.Close()
-		drainChildOutput(stdout, s.copyDone)
-		// The tail is complete only now, and the lost-session report comes
-		// after the provider's own final output. Both precede the log
-		// close (the capture writes to the log) and the not-alive state
-		// (a SendInput that sees it must also see the loss).
+		// The tail is complete once stderr is drained. The loss is decided
+		// before stdout is drained, which waits for the reader and so for
+		// any callback it is running; a SendInput from such a callback must
+		// find it. It is announced after the provider's own final output.
+		// Both precede the log close (the capture writes to the log) and the
+		// not-alive state (a SendInput that sees it must also see the loss).
 		stderrCap.drain()
-		s.classifyExit(stderrCap, err)
+		lost := s.classifyExit(stderrCap, err, s.attemptEnded(context.Background(), ""))
+		drainChildOutput(stdout, s.copyDone)
+		s.announceLost(lost)
 		_ = s.logFile.Close()
 		s.alive.Store(false)
 		s.state.Store(int32(LiveStateStopped))
@@ -623,7 +631,7 @@ func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exe
 
 	go func() {
 		defer close(readerDone)
-		s.runReaderLoop(stdout)
+		s.runReaderLoop(stdout, stderrCap)
 	}()
 
 	sup := s.opts.Supervisor
@@ -676,9 +684,12 @@ func (s *streamingStdioSession) waitOnceSupervised(ctx context.Context, cmd *exe
 	s.stdout = nil
 	s.ioLock.Unlock()
 	_ = stdin.Close()
-	drainChildOutput(stdout, readerDone)
+	// Decided before stdout is drained, announced after it: see the legacy
+	// waiter.
 	stderrCap.drain()
-	s.classifyExit(stderrCap, waitErr)
+	lost := s.classifyExit(stderrCap, waitErr, s.attemptEnded(ctx, cause.getCause()))
+	drainChildOutput(stdout, readerDone)
+	s.announceLost(lost)
 
 	_ = attempt
 	return buildExitError(cmd.ProcessState, waitErr, cause.getCause())
@@ -819,7 +830,7 @@ func (s *streamingStdioSession) Stop(ctx context.Context) error {
 	return killErr
 }
 
-func (s *streamingStdioSession) SendInput(_ context.Context, data []byte) error {
+func (s *streamingStdioSession) SendInput(ctx context.Context, data []byte) error {
 	if err := s.readerFault.get(); err != nil {
 		return err
 	}
@@ -833,7 +844,7 @@ func (s *streamingStdioSession) SendInput(_ context.Context, data []byte) error 
 		return ErrNoInputChannel
 	}
 	if err := s.writeInput(data); err != nil {
-		return s.inputFailure(err)
+		return s.inputFailure(ctx, err)
 	}
 	return nil
 }
