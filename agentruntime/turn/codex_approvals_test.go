@@ -166,3 +166,114 @@ func TestCodexApprovalResponderValidate(t *testing.T) {
 		}
 	}
 }
+
+// codexMCPToolCallElicitationTitled is the params block codex-cli 0.159.2
+// sent for an MCP tool-call approval of a tool that declares a title,
+// captured from a live app-server session on 2026-10-01 (CW-20261001-0084).
+// Codex sends no _meta.tool_name; the message quotes the tool's name, not its
+// title, which arrives separately as _meta.tool_title.
+const codexMCPToolCallElicitationTitled = `{
+  "threadId": "01a0f5d0-fc55-7cb1-915d-651ca93c59dd",
+  "turnId": "01a0f5d0-fce9-7da1-957c-2cf701a8ba3e",
+  "serverName": "probe",
+  "mode": "form",
+  "_meta": {
+    "codex_approval_kind": "mcp_tool_call",
+    "persist": ["session", "always"],
+    "tool_title": "Probe Echo Title",
+    "tool_description": "Echo the given text back.",
+    "tool_params": {"text": "hello"},
+    "tool_params_display": [{"name": "text", "value": "hello", "display_name": "text"}]
+  },
+  "message": "Allow the probe MCP server to run tool \"probe_echo\"?",
+  "requestedSchema": {"type": "object", "properties": {}}
+}`
+
+func TestCodexApprovalResponderMCPAllowList(t *testing.T) {
+	const (
+		toolNameInMeta = `{"serverName":"mux","message":"Allow the mux MCP server to run tool \"ignored\"?","_meta":{"codex_approval_kind":"mcp_tool_call","tool_name":"cerberus_ssh_exec"}}`
+		unreadableTool = `{"serverName":"mux","message":"Approve app tool call?","_meta":{"codex_approval_kind":"mcp_tool_call"}}`
+		noServerName   = `{"message":"Allow the  MCP server to run tool \"x\"?","_meta":{"codex_approval_kind":"mcp_tool_call"}}`
+	)
+	cases := []struct {
+		name      string
+		mode      permission.Mode
+		allow     []string
+		params    string
+		wantAllow bool
+		wantEntry string
+		wantTool  string
+	}{
+		{"no list approves every planted server (unchanged)", permission.ModeDefault, nil, codexMCPToolCallElicitation, true, "", "mux_health"},
+		{"server entry", permission.ModeDefault, []string{"mux"}, codexMCPToolCallElicitation, true, "mux", "mux_health"},
+		{"server/tool entry", "", []string{"probe", "mux/mux_health"}, codexMCPToolCallElicitation, true, "mux/mux_health", "mux_health"},
+		{"tool glob", permission.ModeAcceptEdits, []string{"mux/mux_*"}, codexMCPToolCallElicitation, true, "mux/mux_*", "mux_health"},
+		{"tool glob that does not match", permission.ModeDefault, []string{"mux/torque_*"}, codexMCPToolCallElicitation, false, "", "mux_health"},
+		{"other server only", permission.ModeAcceptEdits, []string{"probe"}, codexMCPToolCallElicitation, false, "", "mux_health"},
+		{"0.159.2 titled tool matches by name", permission.ModeDefault, []string{"probe/probe_echo"}, codexMCPToolCallElicitationTitled, true, "probe/probe_echo", "probe_echo"},
+		{"0.159.2 titled tool does not match by title", permission.ModeDefault, []string{"probe/Probe Echo Title"}, codexMCPToolCallElicitationTitled, false, "", "probe_echo"},
+		{"_meta.tool_name wins over the message", permission.ModeDefault, []string{"mux/mux_*"}, toolNameInMeta, false, "", "cerberus_ssh_exec"},
+		{"unreadable tool matches a server entry", permission.ModeDefault, []string{"mux"}, unreadableTool, true, "mux", ""},
+		{"unreadable tool never matches a tool entry", permission.ModeDefault, []string{"mux/*"}, unreadableTool, false, "", ""},
+		{"no server name matches nothing", permission.ModeDefault, []string{"*"}, noServerName, false, "", ""},
+		{"yolo ignores the list", permission.ModeYolo, []string{"probe"}, codexMCPToolCallElicitation, true, "", "mux_health"},
+		{"plan declines a listed call", permission.ModePlan, []string{"mux"}, codexMCPToolCallElicitation, false, "", "mux_health"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := CodexApprovalResponder{Mode: tc.mode, MCPAllow: tc.allow}
+			if err := r.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			out := r.Decide(CodexElicitationMethod, json.RawMessage(tc.params))
+			if out.Err != nil {
+				t.Fatalf("Err = %v, want a decision", out.Err)
+			}
+			if out.Allowed != tc.wantAllow {
+				t.Errorf("Allowed = %v, want %v (reason %q)", out.Allowed, tc.wantAllow, out.Reason)
+			}
+			if out.MCPAllowEntry != tc.wantEntry {
+				t.Errorf("MCPAllowEntry = %q, want %q", out.MCPAllowEntry, tc.wantEntry)
+			}
+			if out.MCPTool != tc.wantTool {
+				t.Errorf("MCPTool = %q, want %q", out.MCPTool, tc.wantTool)
+			}
+			if len(tc.allow) > 0 && tc.mode != permission.ModeYolo && tc.mode != permission.ModePlan && !strings.Contains(out.Reason, "allow-list") {
+				t.Errorf("Reason %q does not mention the allow-list", out.Reason)
+			}
+			result, _ := out.Response()
+			encoded, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := string(encoded), codexWantWire(CodexApprovalMCPToolCall, tc.wantAllow); got != want {
+				t.Errorf("wire form = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// The allow-list narrows MCP tool calls only; it never touches the sandbox
+// escalations the posture table decides.
+func TestCodexApprovalResponderMCPAllowListLeavesOtherKindsAlone(t *testing.T) {
+	r := CodexApprovalResponder{Mode: permission.ModeAcceptEdits, MCPAllow: []string{"probe"}}
+	if out := r.Decide(CodexFileChangeApprovalMethod, json.RawMessage(codexFileChangeApproval)); !out.Allowed {
+		t.Errorf("accept-edits file change with an MCP allow-list: Allowed = false (%s)", out.Reason)
+	}
+	if out := r.Decide(CodexCommandApprovalMethod, json.RawMessage(codexCommandApproval)); out.Allowed {
+		t.Errorf("accept-edits command with an MCP allow-list: Allowed = true (%s)", out.Reason)
+	}
+}
+
+func TestCodexApprovalResponderValidateMCPAllow(t *testing.T) {
+	for _, entry := range []string{"mux", "mux/torque_task_get", "mux/torque_*", "*", "m?x/[a-z]*"} {
+		if err := (CodexApprovalResponder{MCPAllow: []string{entry}}).Validate(); err != nil {
+			t.Errorf("Validate(MCPAllow %q) = %v, want nil", entry, err)
+		}
+	}
+	for _, entry := range []string{"", "/tool", "mux/", "[", "mux/[a-"} {
+		if err := (CodexApprovalResponder{MCPAllow: []string{entry}}).Validate(); err == nil {
+			t.Errorf("Validate(MCPAllow %q) = nil, want an error", entry)
+		}
+	}
+}

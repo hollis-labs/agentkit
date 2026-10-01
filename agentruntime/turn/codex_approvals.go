@@ -3,6 +3,8 @@ package turn
 import (
 	"encoding/json"
 	"fmt"
+	"path"
+	"strings"
 
 	agentsessions "github.com/hollis-labs/agentkit/agentsessions"
 	permission "github.com/hollis-labs/go-permission"
@@ -63,11 +65,29 @@ const (
 // makes the planted tools unusable rather than safer, and real authorization
 // for them stays with the MCP server and the scopes it was launched with.
 //
+// MCPAllow narrows that: when it has entries, default and accept-edits
+// approve an MCP tool call only if its server and tool match an entry, and
+// decline it otherwise. Plan still declines every call and yolo still
+// approves every call. With no entries every MCP tool call is approved as
+// above, so a host that plants a server exposing high-impact tools lists
+// what its workers may call instead of carving out its own hook.
+//
 // "Decline" lets the agent continue its turn and try something else; the
 // responder never cancels a turn. The zero Mode is ModeDefault. An unknown
 // mode declines everything, and Validate reports it.
 type CodexApprovalResponder struct {
 	Mode permission.Mode
+
+	// MCPAllow lists the MCP tool calls default and accept-edits may
+	// approve. Each entry is "server", for every tool on that server, or
+	// "server/tool". Both halves are path.Match patterns, so "mux/torque_*"
+	// allows the mux server's torque_ tools and nothing else on it. Names
+	// are matched case-sensitively, as Codex sends them: the server is the
+	// elicitation's serverName (the [mcp_servers.<name>] key it was planted
+	// under), and the tool is _meta.tool_name or, since Codex 0.159.2 sends
+	// none, the name quoted in its approval message. A call whose tool name
+	// cannot be read matches only "server" entries.
+	MCPAllow []string
 }
 
 // CodexApprovalOutcome is how a CodexApprovalResponder answered one request.
@@ -86,6 +106,14 @@ type CodexApprovalOutcome struct {
 	Result any
 	// Err is the JSON-RPC error to send instead of a result.
 	Err *agentsessions.JsonRpcError
+
+	// MCPServer and MCPTool name the MCP tool call an elicitation asked
+	// about, as far as they could be read; empty for other requests.
+	MCPServer string
+	MCPTool   string
+	// MCPAllowEntry is the MCPAllow entry that granted the call, when one
+	// did.
+	MCPAllowEntry string
 }
 
 // Response returns the outcome in the shape JsonRpcRequestHook returns.
@@ -96,15 +124,26 @@ func (o CodexApprovalOutcome) Response() (any, *agentsessions.JsonRpcError) {
 	return o.Result, nil
 }
 
-// Validate reports an unknown Mode. The empty Mode is valid and means
-// ModeDefault.
+// Validate reports an unknown Mode or a malformed MCPAllow entry. The empty
+// Mode is valid and means ModeDefault.
 func (r CodexApprovalResponder) Validate() error {
 	switch r.Mode {
 	case "", permission.ModeDefault, permission.ModeAcceptEdits, permission.ModePlan, permission.ModeYolo:
-		return nil
 	default:
 		return fmt.Errorf("turn: unknown permission mode %q", r.Mode)
 	}
+	for _, entry := range r.MCPAllow {
+		server, tool, hasTool := strings.Cut(entry, "/")
+		if server == "" || (hasTool && tool == "") {
+			return fmt.Errorf("turn: MCP allow-list entry %q: want \"server\" or \"server/tool\"", entry)
+		}
+		for _, pattern := range []string{server, tool} {
+			if _, err := path.Match(pattern, ""); err != nil {
+				return fmt.Errorf("turn: MCP allow-list entry %q: %w", entry, err)
+			}
+		}
+	}
+	return nil
 }
 
 // Hook returns a function for agentsessions.StartOptions.JsonRpcRequestHook.
@@ -129,8 +168,11 @@ func (r CodexApprovalResponder) Decide(method string, params json.RawMessage) Co
 		return r.decide(method, CodexApprovalFileChange, codexDecisionResult)
 	case CodexElicitationMethod:
 		var p struct {
-			Meta struct {
+			ServerName string `json:"serverName"`
+			Message    string `json:"message"`
+			Meta       struct {
 				ApprovalKind string `json:"codex_approval_kind"`
+				ToolName     string `json:"tool_name"`
 			} `json:"_meta"`
 		}
 		if err := decodeCodexParams(params, &p); err != nil {
@@ -139,7 +181,11 @@ func (r CodexApprovalResponder) Decide(method string, params json.RawMessage) Co
 		if CodexApprovalKind(p.Meta.ApprovalKind) != CodexApprovalMCPToolCall {
 			return codexUnhandled(method, fmt.Sprintf("elicitation kind %q is not an MCP tool-call approval", p.Meta.ApprovalKind))
 		}
-		return r.decide(method, CodexApprovalMCPToolCall, codexElicitationResult)
+		tool := p.Meta.ToolName
+		if tool == "" {
+			tool = codexMCPToolFromMessage(p.ServerName, p.Message)
+		}
+		return r.decideMCP(method, p.ServerName, tool)
 	default:
 		return codexUnhandled(method, "not a Codex approval request")
 	}
@@ -154,6 +200,71 @@ func (r CodexApprovalResponder) decide(method string, kind CodexApprovalKind, re
 		Reason:  reason,
 		Result:  result(allowed),
 	}
+}
+
+// decideMCP applies the posture table, then MCPAllow, to an MCP tool call.
+func (r CodexApprovalResponder) decideMCP(method, server, tool string) CodexApprovalOutcome {
+	out := r.decide(method, CodexApprovalMCPToolCall, codexElicitationResult)
+	out.MCPServer, out.MCPTool = server, tool
+	if !out.Allowed || r.Mode == permission.ModeYolo || len(r.MCPAllow) == 0 {
+		return out
+	}
+	mode := r.Mode
+	if mode == "" {
+		mode = permission.ModeDefault
+	}
+	call := server + "/" + tool
+	if tool == "" {
+		call = server + " (tool name unreadable)"
+	}
+	if entry, ok := matchMCPAllow(r.MCPAllow, server, tool); ok {
+		out.MCPAllowEntry = entry
+		out.Reason = fmt.Sprintf("%s mode: MCP tool call %s approved by allow-list entry %q", mode, call, entry)
+		return out
+	}
+	out.Allowed = false
+	out.Reason = fmt.Sprintf("%s mode: MCP tool call %s is not on the MCP allow-list, declined", mode, call)
+	out.Result = codexElicitationResult(false)
+	return out
+}
+
+// matchMCPAllow returns the first entry that allows server/tool. An entry
+// naming a tool never matches a call whose tool is unknown, and nothing
+// matches a call with no server name.
+func matchMCPAllow(entries []string, server, tool string) (string, bool) {
+	if server == "" {
+		return "", false
+	}
+	for _, entry := range entries {
+		serverPattern, toolPattern, hasTool := strings.Cut(entry, "/")
+		if ok, _ := path.Match(serverPattern, server); !ok {
+			continue
+		}
+		if !hasTool {
+			return entry, true
+		}
+		if tool == "" {
+			continue
+		}
+		if ok, _ := path.Match(toolPattern, tool); ok {
+			return entry, true
+		}
+	}
+	return "", false
+}
+
+// codexMCPToolFromMessage reads the tool name from the approval message
+// Codex builds for an MCP server's tool call: Allow the <server> MCP server
+// to run tool "<tool>"? (codex-cli 0.154.0 to 0.159.2, which send no
+// _meta.tool_name). The name is quoted as the tool's name even when the
+// tool has a title. Any other message yields "".
+func codexMCPToolFromMessage(server, message string) string {
+	prefix := "Allow the " + server + " MCP server to run tool \""
+	const suffix = "\"?"
+	if server == "" || !strings.HasPrefix(message, prefix) || !strings.HasSuffix(message, suffix) || len(message) <= len(prefix)+len(suffix) {
+		return ""
+	}
+	return message[len(prefix) : len(message)-len(suffix)]
 }
 
 // codexApprovalAllowed is the posture table in CodexApprovalResponder's doc.
