@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+	permission "github.com/hollis-labs/go-permission"
 )
 
 // RuntimeBinding is the frozen hot-path-readable runtime contract the
@@ -38,23 +39,15 @@ type RuntimeBinding struct {
 	// string (for example "30s"). Optional.
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 
-	// Permission is the spawned agent's permission/approval posture, in
-	// the provider's OWN vocabulary — interpreted against Provider:
-	//
-	//   - claude → permission_mode (default / acceptEdits / plan /
-	//     bypassPermissions). Empty plants no `permissions.defaultMode`,
-	//     leaving a headless claude in interactive `default` mode — it
-	//     will hang on the first approval prompt. A headless claude
-	//     runtime-binding should set this; acceptEdits is the safe
-	//     non-interactive middle ground.
-	//   - codex  → approval_policy (untrusted / on-failure / on-request /
-	//     never). Empty is safe — go-providers defaults it to `never`.
-	//
-	// Carried verbatim onto LaunchPlan.Provider.Permission by
-	// PlanFromLaunch and applied to the go-providers adapter by
-	// providerplant.DefaultResolver. The adapter validates the value at
-	// boot-dir render time. Optional.
-	Permission string `yaml:"permission,omitempty" json:"permission,omitempty"`
+	// Permission is the spawned agent's permission posture: go-permission's
+	// Mode (default, accept-edits, plan or yolo; D-72), never a provider's
+	// own spelling (acceptEdits, bypassPermissions, on-request, ...). Each
+	// provider's mapping is the go-providers registry's. Empty sets no
+	// posture and leaves the provider's own default; Compile rejects an
+	// empty one for a headless claude launch, which would wait on its first
+	// approval. Carried verbatim onto LaunchPlan.Provider.Permission by
+	// PlanFromLaunch. Optional.
+	Permission permission.Mode `yaml:"permission,omitempty" json:"permission,omitempty"`
 }
 
 // Validate enforces the frozen RuntimeBinding field contract.

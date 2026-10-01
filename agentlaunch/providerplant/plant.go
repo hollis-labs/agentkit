@@ -9,8 +9,10 @@ import (
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/registry"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
+	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
 	"github.com/hollis-labs/go-materialize/artifact"
 	"github.com/hollis-labs/go-materialize/materialize"
 )
@@ -110,8 +112,12 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 	bootDir := prepared.PlantedBootDir
 	projectDir := projectRootForPrepared(prepared)
 	plantCtx := plantContextFor(prepared, projectDir)
+	posture, err := launchPosture(plan)
+	if err != nil {
+		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
+	}
 
-	artifacts, projection, binding, launch, err := projectArtifactsAndBinding(prepared, adapter, plantCtx, projectDir)
+	artifacts, projection, binding, launch, err := projectArtifactsAndBinding(prepared, adapter, plantCtx, projectDir, posture)
 	if err != nil {
 		return nil, err
 	}
@@ -139,11 +145,14 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 		return nil, fmt.Errorf("agentlaunch/providerplant: materialize: %w", err)
 	}
 
-	argv, err := finalArgv(prepared, projection, binding, launch)
+	argv, err := finalArgv(prepared, projection, binding, launch, posture)
 	if err != nil {
 		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
 	}
 	env := mergePreparedEnv(prepared.Env, binding.Env)
+	for name, value := range posture.Env {
+		env[name] = agentlaunch.EnvVar{Value: value, Source: "posture", Precedence: 20}
+	}
 	execution := &agentlaunch.PreparedExecution{
 		InputKind:       agentlaunch.PrepareInputArtifacts,
 		Artifacts:       artifacts,
@@ -177,7 +186,7 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 // the prompt, the launch's own flags at the convention's extra-argument slot),
 // and runtimes resolve every turn from the template. A legacy BootDirSpec
 // provider returns no template.
-func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter provider.BootDirProvider, plantCtx provider.PlantContext, projectDir string) (artifact.Tree, agentlaunch.ProviderProjection, provider.LaunchBinding, *agentlaunch.TurnTemplate, error) {
+func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter provider.BootDirProvider, plantCtx provider.PlantContext, projectDir string, posture registry.PostureLaunch) (artifact.Tree, agentlaunch.ProviderProjection, provider.LaunchBinding, *agentlaunch.TurnTemplate, error) {
 	plan := prepared.Compiled.Plan
 	bootDir := prepared.PlantedBootDir
 	if pp, ok := adapter.(provider.ProjectionProvider); ok {
@@ -188,7 +197,7 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 		launch := &agentlaunch.TurnTemplate{
 			Convention: proj.Launch,
 			Roots:      provider.ProjectionRoots{ProjectRoot: projectDir, BootRoot: bootDir, ConfigRoot: bootDir, StateRoot: prepared.WorkspaceDir, CWD: projectDir},
-			ExtraArgs:  launchExtraArgs(plan),
+			ExtraArgs:  launchExtraArgs(plan, posture),
 		}
 		binding, err := proj.Launch.ResolveTurn(launch.Roots, provider.TurnInput{Prompt: bootPromptArg(prepared)}, launch.ExtraArgs)
 		if err != nil {
@@ -201,12 +210,35 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 	return artifacts, projection, binding, nil, err
 }
 
-// launchExtraArgs are the launch plan's own flags: Provider.Flags, then
-// Injection.Args.
-func launchExtraArgs(plan *agentlaunch.LaunchPlan) []string {
-	extras := make([]string, 0, len(plan.Provider.Flags)+len(plan.Injection.Args))
+// launchExtraArgs are the launch's own flags: the posture's, then
+// Provider.Flags, then Injection.Args. A caller's flag after the posture's is
+// the one a CLI that takes the last value honours.
+func launchExtraArgs(plan *agentlaunch.LaunchPlan, posture registry.PostureLaunch) []string {
+	extras := make([]string, 0, len(posture.Args)+len(plan.Provider.Flags)+len(plan.Injection.Args))
+	extras = append(extras, posture.Args...)
 	extras = append(extras, plan.Provider.Flags...)
 	return append(extras, plan.Injection.Args...)
+}
+
+// launchPosture maps the plan's permission posture (go-permission's Mode)
+// onto the provider's launch flags and environment through the go-providers
+// registry's Posture hook (CW-20260930-0138). An empty posture maps to
+// nothing, so a launch that names none carries exactly the argv and
+// environment it would without this step. The flags go at the convention's
+// extra-argument slot, before "--", with the launch's other flags.
+func launchPosture(plan *agentlaunch.LaunchPlan) (registry.PostureLaunch, error) {
+	if plan.Provider.Permission == "" {
+		return registry.PostureLaunch{}, nil
+	}
+	desc, err := matrix.Lookup(plan.Provider, plan.Runtime)
+	if err != nil {
+		return registry.PostureLaunch{}, fmt.Errorf("%w: %v", ErrAdapterResolution, err)
+	}
+	posture, err := desc.Registry.PostureFor(plan.Provider.Permission, plan.Runtime)
+	if err != nil {
+		return registry.PostureLaunch{}, fmt.Errorf("permission posture: %w", err)
+	}
+	return posture, nil
 }
 
 func legacyProjection(prepared *agentlaunch.PreparedLaunch, spec provider.BootDirSpec, plantCtx provider.PlantContext, projectDir string) (artifact.Tree, agentlaunch.ProviderProjection, provider.LaunchBinding, error) {
@@ -295,7 +327,7 @@ func upsertArtifact(entries []artifact.Entry, next artifact.Entry) []artifact.En
 // them appended. Either way the first of them must be an option: a positional
 // would be read as part of the prompt or as one more value of a variadic flag
 // (Claude's --add-dir). That is ErrPositionalAfterProjection.
-func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding, launch *agentlaunch.TurnTemplate) ([]string, error) {
+func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.ProviderProjection, binding provider.LaunchBinding, launch *agentlaunch.TurnTemplate, posture registry.PostureLaunch) ([]string, error) {
 	plan := prepared.Compiled.Plan
 	binary := plan.Provider.Binary
 	if binary == "" {
@@ -304,7 +336,7 @@ func finalArgv(prepared *agentlaunch.PreparedLaunch, projection agentlaunch.Prov
 	if binary == "" {
 		binary = projection.Provider
 	}
-	extras := launchExtraArgs(plan)
+	extras := launchExtraArgs(plan, posture)
 	if len(binding.Argv) > 0 && len(extras) > 0 && !strings.HasPrefix(extras[0], "-") {
 		return nil, fmt.Errorf("%w: %q is not an option", ErrPositionalAfterProjection, extras[0])
 	}

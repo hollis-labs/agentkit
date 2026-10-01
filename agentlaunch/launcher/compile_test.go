@@ -9,6 +9,7 @@ import (
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
+	permission "github.com/hollis-labs/go-permission"
 )
 
 // fixedTime is the pinned wall-clock value tests use to make Compile's
@@ -53,7 +54,7 @@ func TestCompileHeadlessClaudeNeedsPermission(t *testing.T) {
 	// background claude WITH a permission posture → accepted.
 	p = validPlanForCompile()
 	p.Mode = agentlaunch.LaunchBackground
-	p.Provider.Permission = "acceptEdits"
+	p.Provider.Permission = permission.ModeAcceptEdits
 	if _, err := Compile(context.Background(), p); err != nil {
 		t.Errorf("background claude with Permission set: Compile = %v, want nil", err)
 	}
@@ -73,6 +74,25 @@ func TestCompileHeadlessClaudeNeedsPermission(t *testing.T) {
 	p.Mode = agentlaunch.LaunchBackground
 	if _, err := Compile(context.Background(), p); err != nil {
 		t.Errorf("background codex, empty Permission: Compile = %v, want nil (codex is exempt)", err)
+	}
+}
+
+// Provider.Permission is go-permission's Mode, the same for every provider
+// (D-72); a provider's own spelling is refused at compile time.
+func TestCompileRejectsAProviderPermissionSpelling(t *testing.T) {
+	for _, spelling := range []permission.Mode{"acceptEdits", "bypassPermissions", "on-request", "never", "bypass"} {
+		p := validPlanForCompile()
+		p.Provider.Permission = spelling
+		if _, err := Compile(context.Background(), p); !errors.Is(err, ErrInvalidPermission) {
+			t.Errorf("Permission %q: Compile = %v, want ErrInvalidPermission", spelling, err)
+		}
+	}
+	for _, mode := range []permission.Mode{permission.ModeDefault, permission.ModeAcceptEdits, permission.ModePlan, permission.ModeYolo} {
+		p := validPlanForCompile()
+		p.Provider.Permission = mode
+		if _, err := Compile(context.Background(), p); err != nil {
+			t.Errorf("Permission %q: Compile = %v", mode, err)
+		}
 	}
 }
 

@@ -29,6 +29,7 @@ import (
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/layout"
+	"github.com/hollis-labs/go-providers/registry"
 
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
@@ -42,6 +43,13 @@ import (
 // producing a launch that is structurally guaranteed to hang. Callers can
 // branch on it (errors.Is) to mark the task blocked-on-misconfiguration.
 var ErrHeadlessClaudeNeedsPermission = errors.New("agentlaunch/compile: headless claude launch requires Provider.Permission")
+
+// ErrInvalidPermission is returned by Compile when Provider.Permission is not
+// one of go-permission's four Modes (default, accept-edits, plan, yolo). A
+// provider's own spelling (acceptEdits, bypassPermissions, on-request, ...)
+// is refused: the go-providers registry maps the Mode onto each provider's
+// own (D-72).
+var ErrInvalidPermission = errors.New("agentlaunch/compile: Provider.Permission is not a go-permission Mode")
 
 // CompileOptions tunes the Compile entry point. The zero value is the
 // production default: time.Now for the compile timestamp, empty source
@@ -145,8 +153,11 @@ func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOp
 	if desc.ProviderID == runtimes.Claude &&
 		plan.Mode != agentlaunch.LaunchInteractive &&
 		plan.Provider.Permission == "" {
-		return nil, fmt.Errorf("%w (launch mode %q): set Provider.Permission to acceptEdits / plan / bypassPermissions",
+		return nil, fmt.Errorf("%w (launch mode %q): set Provider.Permission to a go-permission Mode: accept-edits, plan or yolo, or default to deny what needs approval",
 			ErrHeadlessClaudeNeedsPermission, plan.Mode)
+	}
+	if _, err := desc.Registry.PostureFor(plan.Provider.Permission, plan.Runtime); errors.Is(err, registry.ErrInvalidPosture) {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPermission, err)
 	}
 
 	resolved, err := agentlaunch.ResolvePlanPaths(plan)
