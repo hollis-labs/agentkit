@@ -1,5 +1,7 @@
 package agentlaunch
 
+import permission "github.com/hollis-labs/go-permission"
+
 // ProviderSpec names the provider adapter (claude / codex / opencode /
 // future) and carries the configuration the launcher needs to spawn it.
 // The ID drives adapter selection through go-providers; everything else
@@ -40,12 +42,13 @@ type ProviderSpec struct {
 	// Adapter-defined string (e.g. "claude-sonnet-4.5"). Optional.
 	ModelOverride string `yaml:"model_override,omitempty" json:"model_override,omitempty"`
 
-	// Permission is the spawned agent's permission/approval posture in the
-	// provider's own vocabulary (claude permission_mode / codex
-	// approval_policy — see RuntimeBinding.Permission). providerplant's
-	// DefaultResolver applies it to the resolved go-providers adapter
-	// (ClaudeAdapter.PermissionMode / CodexAdapter.ApprovalPolicy) so the
-	// planted boot dir carries the non-interactive approval contract.
-	// PlanFromLaunch sets it from RuntimeBinding.Permission. Optional.
-	Permission string `yaml:"permission,omitempty" json:"permission,omitempty"`
+	// Permission is the spawned agent's permission posture: go-permission's
+	// Mode (default, accept-edits, plan or yolo; D-72), the same for every
+	// provider. providerplant maps it onto the provider's own launch flags or
+	// environment through the go-providers registry's Posture hook
+	// (registry.Descriptor.PostureFor). Empty sets no posture: the launch
+	// carries exactly the argv and environment it would without one, and the
+	// provider keeps its own default. PlanFromLaunch sets it from
+	// RuntimeBinding.Permission. Optional.
+	Permission permission.Mode `yaml:"permission,omitempty" json:"permission,omitempty"`
 }

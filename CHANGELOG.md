@@ -43,6 +43,58 @@ launch (CW-20260930-0237). Requires go-sandbox v0.5.0.
   - a path through a symlink the agent could re-point;
   - on Linux, a missing path the agent could create.
 
+## v0.17.0 — 2026-10-01
+
+The permission posture is go-permission's Mode, mapped per provider by the
+go-providers registry (CW-20260930-0138, D-72). Requires go-providers v0.37.0.
+
+### Changed
+
+- **`LaunchPlan.Provider.Permission` and `RuntimeBinding.Permission` are a
+  `permission.Mode`** (`default`, `accept-edits`, `plan`, `yolo`), the same
+  for every provider. Previously each was a string in the provider's own
+  vocabulary (`acceptEdits`, `bypassPermissions`, `on-request`, ...). A
+  provider spelling is now refused: `Compile` returns `ErrInvalidPermission`,
+  and `PrepareExecution` returns go-providers' `registry.ErrInvalidPosture`
+  for one set after `Compile`.
+
+  Claude's spellings map directly: `acceptEdits` is now `accept-edits`, and
+  `bypassPermissions` is now `yolo`. Codex's approval policies have no
+  one-to-one Mode, because a Mode sets both Codex's sandbox and its approval
+  policy. To keep the old headless default (`never` / `workspace-write`),
+  set no Permission at all.
+
+- **`PrepareExecution` maps an explicit posture through the registry's
+  Posture hook** (`registry.Descriptor.PostureFor`), whichever resolver
+  supplied the adapter. The posture's flags lead the launch's extra
+  arguments, before `Provider.Flags` and `Injection.Args`, so the first turn
+  and every later turn carry them at the convention's extra-argument slot,
+  before `--`. Its environment variables, such as OpenCode's
+  `OPENCODE_PERMISSION`, are set over the launch's, with source `posture`.
+  The per-provider mapping, as measured, is in go-providers v0.37.0's
+  CHANGELOG.
+- **`PreparedExecution.Posture`** records the Mode the bindings were mapped
+  from (empty when none), so a host that also answers the agent's approval
+  requests, such as the wrapper's `CodexApprovalResponder`, can answer from
+  the same Mode.
+- **`DefaultResolver` no longer sets `ClaudeAdapter.PermissionMode` or
+  `CodexAdapter.ApprovalPolicy`.** The posture travels as launch flags
+  instead. Claude's `--permission-mode` overrides a planted
+  `permissions.defaultMode`, and Codex's `-c` overrides the planted
+  config.toml.
+- `ErrHeadlessClaudeNeedsPermission`'s message names the Modes.
+
+### Unchanged
+
+- **An empty `Permission` sets no posture.** The launch carries exactly the
+  argv and environment it did in v0.16.0, so Codex keeps go-providers'
+  `never` / `workspace-write` default and OpenCode gets no
+  `OPENCODE_PERMISSION`. `TestPrepareExecution_EmptyPostureMatchesV0_16_0`
+  compares claude, codex, opencode and antigravity launches in each native
+  mode against a golden generated from v0.16.0.
+- ACP launches have no boot dir and do not reach `PrepareExecution`. Their
+  posture is the ACP permission responder's, best effort.
+
 ## v0.16.0 — 2026-10-01
 
 ### Security

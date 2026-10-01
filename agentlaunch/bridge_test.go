@@ -27,7 +27,7 @@ func validBridgeInput() PlanFromLaunchInput {
 			RuntimeKind: runtimes.ModeSubprocessPerTurn,
 			Args:        []string{"--flag"},
 			Timeout:     "3h",
-			Permission:  "on-request",
+			Permission:  "plan",
 		},
 		Agent: AgentSpec{ID: "torque-engineer"},
 		Mode:  LaunchBackground,
@@ -58,8 +58,8 @@ func TestPlanFromLaunch(t *testing.T) {
 	if len(plan.Provider.Flags) != 1 || plan.Provider.Flags[0] != "--flag" {
 		t.Errorf("Provider.Flags = %v, want [--flag]", plan.Provider.Flags)
 	}
-	if plan.Provider.Permission != "on-request" {
-		t.Errorf("Provider.Permission = %q, want on-request (carried from RuntimeBinding.Permission)", plan.Provider.Permission)
+	if plan.Provider.Permission != "plan" {
+		t.Errorf("Provider.Permission = %q, want plan (carried from RuntimeBinding.Permission)", plan.Provider.Permission)
 	}
 	if plan.Runtime != runtimes.ModeSubprocessPerTurn {
 		t.Errorf("Runtime = %q, want subprocess", plan.Runtime)
