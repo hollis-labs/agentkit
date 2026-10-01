@@ -153,16 +153,37 @@ func (r *adapterRuntime) Start(ctx context.Context, opts StartOptions) (Session,
 	s.sessionID.Store(opts.SessionIDPreset)
 	s.alive.Store(true)
 	s.state.Store(int32(LiveStateIdle))
+	if opts.Launch != nil && s.buildArgs != nil {
+		return nil, errors.New("agentsessions: AdapterRuntimeConfig.BuildArgs and a launch template (StartOptions.Launch) are mutually exclusive: the template owns every turn's argv")
+	}
+	launchArgs := false
 	if s.buildArgs == nil {
-		s.buildArgs = func(prompt, sessionID string) []string {
-			return sessionAdapter.BuildArgs(prompt, "", sessionID)
+		if opts.Launch != nil {
+			// A prepared launch's template gives each turn its own prompt
+			// and resume id, with ExtraArgs at its extra-argument slot. Only
+			// root arguments can fail to resolve, so one check here covers
+			// every turn.
+			if _, err := spawnArgs(sessionAdapter, opts, "", "", ""); err != nil {
+				return nil, err
+			}
+			turnOpts := opts
+			s.buildArgs = func(prompt, sessionID string) []string {
+				args, _ := spawnArgs(sessionAdapter, turnOpts, prompt, "", sessionID)
+				return args
+			}
+			launchArgs = true
+		} else {
+			s.buildArgs = func(prompt, sessionID string) []string {
+				return sessionAdapter.BuildArgs(prompt, "", sessionID)
+			}
 		}
 	}
 	// ExtraArgs splice composes over whatever buildArgs is in use (caller-
 	// supplied or default). Captures len at Start; opts is value-copied
 	// into the session struct so post-Start mutation by the caller does
-	// not retroactively rewrite per-turn argv.
-	if len(opts.ExtraArgs) > 0 {
+	// not retroactively rewrite per-turn argv. A launch template has
+	// already placed them.
+	if len(opts.ExtraArgs) > 0 && !launchArgs {
 		inner := s.buildArgs
 		extra := append([]string(nil), opts.ExtraArgs...)
 		s.buildArgs = func(prompt, sessionID string) []string {

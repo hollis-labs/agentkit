@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,13 @@ func (r *jsonRpcStdioRuntime) Start(ctx context.Context, opts StartOptions) (Ses
 	}
 	if opts.Workdir == "" {
 		return nil, errors.New("agentsessions: StartOptions.Workdir is required for jsonrpc-stdio runtime")
+	}
+	if opts.Launch != nil && opts.BootMode == "stdin" && opts.BootPrompt != "" {
+		// A prepared launch's JSON-RPC child (codex app-server) takes turns
+		// as calls; the boot prompt as raw text on stdin would corrupt the
+		// JSON-RPC stream. Its context is planted in the boot dir instead.
+		log.Printf("agentsessions: jsonrpc-stdio: not writing the boot prompt to stdin for a prepared launch (BootMode stdin); a JSON-RPC child takes turns as calls")
+		opts.BootMode = ""
 	}
 
 	bootDir, planted, sessionAdapter, err := preparePlant(opts, r.cfg.Adapter, r.cfg.ID)
@@ -241,9 +249,9 @@ func (s *jsonRpcStdioSession) spawnAttempt(attempt int) (*exec.Cmd, io.WriteClos
 			sessionIDPreset = sid
 		}
 	}
-	args := s.adapter.BuildArgs("", systemPrompt, sessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
+	args, err := spawnArgs(s.adapter, s.opts, "", systemPrompt, sessionIDPreset)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204

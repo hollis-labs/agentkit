@@ -224,9 +224,9 @@ func (s *serveHTTPSession) spawn() error {
 		return fmt.Errorf("agentsessions: adapter %q binary not found", s.adapter.Name())
 	}
 
-	args := s.adapter.BuildArgs("", s.opts.BootPrompt, s.opts.SessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
+	args, err := spawnArgs(s.adapter, s.opts, "", s.opts.BootPrompt, s.opts.SessionIDPreset)
+	if err != nil {
+		return err
 	}
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args

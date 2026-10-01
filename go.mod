@@ -9,10 +9,13 @@ require (
 	github.com/hollis-labs/go-llm-types v0.3.0
 	github.com/hollis-labs/go-materialize v0.1.0
 	github.com/hollis-labs/go-permission v0.1.0
-	github.com/hollis-labs/go-providers v0.32.0
+	github.com/hollis-labs/go-providers v0.34.1
 	github.com/hollis-labs/go-runner v0.7.0
-	github.com/hollis-labs/go-sandbox v0.4.0
+	github.com/hollis-labs/go-sandbox v0.4.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/kr/text v0.2.0 // indirect
+require (
+	github.com/hollis-labs/go-safefs v0.1.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
+)

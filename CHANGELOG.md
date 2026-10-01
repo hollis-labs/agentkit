@@ -4,6 +4,94 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.13.0 — 2026-10-01
+
+One argv owner, agentkit half (CW-20260930-0135). A prepared launch now
+resolves every turn's argv from the provider's launch convention instead of
+reusing the first turn's: each turn carries its own prompt and resume id, the
+projected argv is no longer appended a second time after the adapter's
+BuildArgs, and streaming-stdio Claude gets its boot prompt on stdin. These were
+the argv failures of the 2026-10-01 smoke test (CW-20261001-0015): Claude
+streaming launches lost their boot prompt, and Codex ran
+`app-server app-server`. Requires go-providers v0.34.1 (was v0.32.0), whose
+conventions put a positional prompt last after `--` (CW-20261001-0069), and
+go-sandbox v0.4.1 (was v0.4.0).
+
+### Added
+
+- `agentlaunch.TurnTemplate`: a provider `LaunchConvention` bound to its
+  launch roots, plus the launch's own flags. `TurnArgv(provider.TurnInput,
+  extra...)` resolves one turn.
+- `ExecutionBindings.Launch` and `PreparedLaunch.Launch` carry the template
+  (providerplant sets both for every provider with a projection), and
+  `PreparedExecution.Boot` (`BootDelivery`) carries the boot mode, prompt and
+  content, so `ToSessionLaunchFromPreparedExecution` hands them on.
+- `agentsessions.StartOptions.Launch`. When it is set (the shims set it, and
+  Start copies `PreparedExecution.Bindings.Launch` into it), every spawn's
+  argv is the template resolved for that turn, with `ExtraArgs` at the
+  convention's extra-argument slot. The adapter still supplies the binary and
+  parsing, but its `BuildArgs` is not called. Start keeps its own deep copy
+  (`TurnTemplate.Clone`), so editing the caller's template afterwards does not
+  change later turns.
+- `agentsessions.DeliverStreamingBoot` and `agentsessions.ClaudeStreamingUserFrame`.
+  `turn.ClaudeStreamingUserFrame` now delegates to the latter.
+- Start takes the boot fields from `PreparedExecution.Boot` when the caller
+  set none, and delivers a streaming-stdio launch's boot prompt as its first
+  turn. A consumer that passes `PreparedExecution` straight to Start, as
+  go-agent-wrapper does, gets the boot turn without the shim.
+
+### Changed
+
+- **Breaking:** with a launch template, `ExecutionBindings.Argv` and
+  `PreparedLaunch.Argv` are only the first turn's argv, for display and
+  compatibility. Editing them no longer changes what runs. To add flags to
+  every turn, append to `Launch.ExtraArgs`, or set the adapter's own fields.
+  `PreparedExecution` no longer puts `Bindings.Argv[1:]` into
+  `StartOptions.ExtraArgs`, and the shims no longer copy `Argv[1:]` into
+  `ExtraArgs` when there is a template; a legacy BootDirSpec provider keeps
+  the old behaviour.
+  - Tether must delete `sharedExtraArgs` in the same bump. It re-extracts
+    root-bound args from `Argv[1:]`, which the template already contains, so
+    they would appear twice (Claude `--mcp-config`/`--add-dir`, codex exec
+    `--cd P --cd P`).
+  - Torque splices `--settings` into `Bindings.Argv` (runtime/agent/boot.go
+    around line 358), and splices its profile args and `--model` into it on
+    the wrapper path (around line 1271). Those edits no longer reach the
+    spawn and must move to `Launch.ExtraArgs` or adapter fields.
+  - Torque's `PrepareExecution`-then-`ToSessionLaunch(prepared)` path leaves
+    `PreparedLaunch.Launch` nil (only `Plant` sets it), so that path keeps the
+    old composition until Torque adopts.
+- `AdapterRuntimeConfig.BuildArgs` together with a launch template is an
+  error at Start: the template owns every turn's argv, and the override would
+  have dropped every projected flag.
+- A jsonrpc-stdio session with a launch template and `BootMode: stdin` no
+  longer writes the raw boot prompt into the child's JSON-RPC stdin; it logs
+  why and skips it.
+- `providerplant.DefaultResolver` builds each mode's own adapter through
+  go-providers' `provider.NewAdapter`. Streaming-stdio Claude now projects
+  `-p --input-format stream-json …` rather than print mode's
+  `-p <boot prompt> …`, and the TUI no print flags. Posture is applied as
+  before: Claude `PermissionMode`, Codex `ApprovalPolicy`, OpenCode `Agent`.
+- A launch's `Provider.Flags` and `Injection.Args` go at the convention's
+  extra-argument slot. For Claude that is before the variadic `--add-dir`,
+  with the prompt last after `--`. They are no longer appended after the
+  projected argv.
+  `ErrPositionalAfterProjection` still refuses a leading positional.
+- The shims deliver a streaming-stdio launch's boot prompt (`BootContent`,
+  else `BootPrompt`) as the auto-fired first turn, framed as a stream-json user
+  message, and clear `BootMode`/`BootPrompt` so the session does not also
+  write it unframed. `BootMode: none` opts out. This replaces Tether's
+  `streamingStdioBootPromptFirstTurn` workaround.
+
+### Known behaviour
+
+- A per-turn runtime delivers the boot prompt only if the consumer sends the
+  kickoff as its first turn: the template's argv carries each turn's own
+  prompt.
+- Streaming-stdio fires the boot turn on a resumed session too
+  (`SessionIDPreset` is set after the shim runs).
+- A PTY launch with a planted boot mode sends no boot turn.
+
 ## v0.12.2 — 2026-10-01
 
 Patch (CW-20260930-0134, deferred from the agentkit#7 review).

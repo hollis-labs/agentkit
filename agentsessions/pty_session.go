@@ -301,9 +301,9 @@ func (s *ptySession) spawnAttempt(attempt int) (*exec.Cmd, *os.File, func(), err
 			sessionIDPreset = sid
 		}
 	}
-	args := s.adapter.BuildArgs("", systemPrompt, sessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
+	args, err := spawnArgs(s.adapter, s.opts, "", systemPrompt, sessionIDPreset)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args

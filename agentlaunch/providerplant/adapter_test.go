@@ -111,7 +111,7 @@ func TestDefaultResolver_ACPOnlyHasNoNativeAdapter(t *testing.T) {
 }
 
 // A registry runtime with a native mode resolves in the matrix, but planting
-// it still needs a constructor case in DefaultResolver (CW-20260930-0134); the
+// it still needs a constructor in go-providers' provider.NewAdapter table; the
 // error says so instead of claiming the runtime is ACP-only.
 func TestDefaultResolver_NewNativeRuntimeNeedsAConstructor(t *testing.T) {
 	registry.RegisterForTest(t, registry.Descriptor{
