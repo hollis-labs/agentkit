@@ -16,7 +16,13 @@
 // convert the on-disk shape into a populated agentlaunch.LaunchPlan and
 // run agentlaunch.LaunchPlan.Validate on the result before returning.
 //
-// This package imports only the parent agentlaunch package, the Go
-// standard library, and gopkg.in/yaml.v3. It deliberately does NOT
-// depend on Tether, Nanite, Torque, go-providers, or go-agent-sessions.
+// A provider's runtime_kind is Tether's own token; the translator maps it
+// onto an agent-contracts-leaf runtimes.Mode ("subprocess" is
+// subprocess-per-turn, "serve-http" is http-sse) and nowhere else in
+// agentkit translates those spellings.
+//
+// This package imports only the parent agentlaunch package,
+// agent-contracts-leaf's runtimes vocabulary, the Go standard library, and
+// gopkg.in/yaml.v3. It deliberately does NOT depend on Tether, Nanite,
+// Torque, go-providers, or agentsessions.
 package catalog

@@ -19,8 +19,9 @@ type MCPSpec struct {
 	Denylist []string `yaml:"denylist,omitempty" json:"denylist,omitempty"`
 
 	// LoopbackURL is the URL of the in-process MCP loopback server the
-	// session connects to for "self-MCP" surfaces (planted into the
-	// bootdir's .mcp.json by go-agent-sessions). Optional.
+	// session connects to for "self-MCP" surfaces. Prepare copies it to
+	// PreparedPlantContext.MCPLoopbackURL, and the go-providers renderers
+	// plant it into the runtime's native MCP config. Optional.
 	LoopbackURL string `yaml:"loopback_url,omitempty" json:"loopback_url,omitempty"`
 
 	// Servers lists per-session MCP servers the agent's MCP client should

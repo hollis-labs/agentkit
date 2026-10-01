@@ -1,12 +1,12 @@
 // Package resolvers ships the app-neutral concrete Resolver
-// implementations registered with the default agentcontext.Provider.
+// implementations registered with agentcontext's DefaultProvider.
 //
 // Each resolver in this package corresponds to one
 // agentcontext.SlotSourceKind and is a pure SlotSpec → SlotResult
 // function (modulo external I/O for cmd / http_* / file kinds). They
-// are intentionally narrow: no dependency on go-agent-launch,
+// are intentionally narrow: no dependency on agentlaunch,
 // go-providers, Tether, Torque, or Nanite — only the agentcontext
-// contract and the Go standard library.
+// contract, its skills subpackage, and the Go standard library.
 //
 // # Resolvers shipped here
 //
@@ -19,9 +19,9 @@
 //   - role_summary: read a role markdown file with default byte cap
 //     (RoleSummaryResolver)
 //
-// The skill_index resolver lives in a sibling subpackage owned by the
-// skill-discovery layer (Subagent C); it is NOT included in
-// Default().
+// The skill_index resolver (SkillIndexResolver, over the sibling skills
+// package's layered discovery) also lives here but is NOT included in
+// Default(); WithSkillIndex adds it.
 //
 // # Registration
 //
@@ -29,6 +29,8 @@
 // agentcontext.NewProvider:
 //
 //	p, err := agentcontext.NewProvider(resolvers.Default(), agentcontext.DefaultRenderer{})
+//
+// For all eight kinds, wrap it: resolvers.WithSkillIndex(resolvers.Default()).
 //
 // Callers that need to wire only a subset (e.g. an air-gapped runtime
 // that forbids HTTP) construct their own map by calling the

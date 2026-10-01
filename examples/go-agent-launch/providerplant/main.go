@@ -5,7 +5,7 @@
 //
 // # Running
 //
-//	go run ./examples/providerplant
+//	go run ./examples/go-agent-launch/providerplant
 //
 // The example uses the opencode provider so it has no global filesystem
 // side effects (the claude planter seeds a workspace-trust marker in

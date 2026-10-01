@@ -67,8 +67,8 @@ func (s LiveState) String() string {
 type Capabilities struct {
 	// PTY: Session.SendInput writes to a live PTY master. Resize is
 	// meaningful. False for turn-based subprocess adapters. Selects the
-	// long-lived PTY runtime kind; mutually exclusive with StreamingStdio
-	// and JsonRpcStdio.
+	// long-lived PTY runtime kind; mutually exclusive with StreamingStdio,
+	// JsonRpcStdio and ServeHTTP.
 	PTY bool
 
 	// StreamingStdio: long-lived non-PTY child speaking NDJSON over
@@ -284,22 +284,21 @@ type StartOptions struct {
 
 	// WorkspaceDir is the per-session persistent root for the lib's own
 	// state — distinct from Workdir (the spawned process's cwd). When
-	// non-empty, the PTY runtime falls back to <WorkspaceDir>/logs/session.log
-	// for its log file when LogPath is empty. The lib never writes to
-	// WorkspaceDir except on the explicit LogPath fallback path; any other
-	// state (checkpoints, plan capture) is consumer-owned.
+	// non-empty, the long-lived runtimes (PTY, streaming-stdio,
+	// jsonrpc-stdio, serve-http) fall back to <WorkspaceDir>/logs/session.log
+	// for their log file when LogPath is empty, and AutoPlantBootDir defaults
+	// its root to <WorkspaceDir>/boot/. Any other state (checkpoints, plan
+	// capture) is consumer-owned.
 	//
-	// Zero-value preserves existing behavior: the PTY runtime requires
-	// LogPath in that case, and the adapter runtime ignores this field
-	// entirely. See README "Two-dir model" for the layered Workdir/
-	// WorkspaceDir convention adopted across the agent-boot portfolio.
+	// When it is empty the long-lived runtimes require LogPath; the
+	// subprocess-per-turn runtime writes no session log.
 	WorkspaceDir string
 
 	// LogPath is the absolute path of the per-session log file the
-	// adapter writes to. Optional. For the PTY runtime, if LogPath is
-	// empty and WorkspaceDir is set, the runtime falls back to
-	// <WorkspaceDir>/logs/session.log. If both are empty, the PTY runtime
-	// returns an error from Start.
+	// long-lived runtimes write to. If LogPath is empty and WorkspaceDir is
+	// set, they fall back to <WorkspaceDir>/logs/session.log; if both are
+	// empty, Start returns an error. The file is opened for appending and
+	// never truncated, so lines a host appends to it are kept.
 	LogPath string
 
 	// BootPrompt is the initial system / boot prompt the adapter feeds
@@ -532,19 +531,19 @@ type StartOptions struct {
 	// events.ToolResult / events.SubagentSpawn / events.SessionID /
 	// events.Done / events.Error / events.Heartbeat / events.Thinking.
 	//
-	// v0.5.0 scope:
-	//   - PTY runtime (Caps.PTY=true): the callback fires per-line from the
-	//     reader goroutine, ONLY when the adapter implements the optional
-	//     provider.EventParser interface. Adapters without EventParser
-	//     produce no typed events through this callback (no fallback
-	//     translation in v0.5.0; the legacy EventFanout surface still
-	//     receives ParseLine output).
-	//   - Adapter runtime (Caps.PTY=false, subprocess-per-turn): the
-	//     callback fires per stdout line when the adapter implements
-	//     provider.EventParser (the adapter is tapped for the turn, so typed
-	//     events arrive in line order alongside ParseLine's), plus the
-	//     session layer's own events.SessionLost. Adapters without
-	//     EventParser produce only events.SessionLost here.
+	// Scope:
+	//   - PTY, streaming-stdio and jsonrpc-stdio runtimes: the callback
+	//     fires per line from the reader goroutine, ONLY when the adapter
+	//     implements the optional provider.EventParser interface. Adapters
+	//     without EventParser produce no typed events through this callback
+	//     (the legacy EventFanout surface still receives ParseLine output).
+	//   - Adapter runtime (subprocess-per-turn): the callback fires per
+	//     stdout line when the adapter implements provider.EventParser (the
+	//     adapter is tapped for the turn, so typed events arrive in line
+	//     order alongside ParseLine's), plus the session layer's own
+	//     events.SessionLost and events.AuthFailed. Adapters without
+	//     EventParser produce only those two here.
+	//   - The serve-http runtime does not call it.
 	//
 	// Sends are synchronous; treat the callback the way you'd treat an
 	// io.Writer's Write — keep the work short or hand off to your own
@@ -555,19 +554,16 @@ type StartOptions struct {
 	// restart-on-crash, and watchdog. See SupervisorOptions godoc. Nil
 	// preserves v0.5.0 default "spawn once, run to completion" behavior.
 	//
-	// v0.6.0 scope: PTY runtime (Caps.PTY=true) only. Supervision is
-	// implemented natively — idle-kill / watchdog goroutines observe
-	// ptmx I/O and a per-attempt cmd.Wait; the restart loop wraps the
-	// wait. Restart preserves the provider-side agent_session_id when
-	// Caps.ProviderSessionID is true (the most-recent observed session
+	// Scope: the PTY, streaming-stdio and jsonrpc-stdio runtimes.
+	// Supervision is implemented natively — idle-kill / watchdog goroutines
+	// observe the child's I/O and a per-attempt cmd.Wait; the restart loop
+	// wraps the wait. Restart preserves the provider-side agent_session_id
+	// when Caps.ProviderSessionID is true (the most-recent observed session
 	// ID is fed into the next spawn's BuildArgs in place of
 	// SessionIDPreset).
 	//
-	// On the adapter runtime (Caps.PTY=false), this field is currently
-	// NOT consulted — adapter-path forwarding to go-runner is blocked on
-	// go-runner publishing its v0.3.0 supervision API (which exists
-	// locally but isn't in the published module). Tracked as a v0.6.x
-	// follow-up. Setting Supervisor with Caps.PTY=false has no effect.
+	// The adapter (subprocess-per-turn) and serve-http runtimes do NOT
+	// consult this field; setting it there has no effect.
 	//
 	// Added in v0.6.0.
 	Supervisor *SupervisorOptions
@@ -684,13 +680,12 @@ type StartOptions struct {
 	// `sh -c "ulimit ...; exec ..."` and, on Linux when systemd-run --user
 	// is available, layers `systemd-run --scope --property=MemoryMax=...`.
 	//
-	// v0.6.0 scope: PTY runtime (Caps.PTY=true) only. The wrap composes
-	// with sandbox.Apply — limits inherit through the sandbox-exec →
-	// real binary chain.
+	// Scope: the long-lived runtimes (PTY, streaming-stdio, jsonrpc-stdio,
+	// serve-http). The wrap composes with sandbox.Apply — limits inherit
+	// through the sandbox-exec → real binary chain.
 	//
-	// On the adapter runtime (Caps.PTY=false), this field is currently
-	// NOT consulted — see the Supervisor godoc above for the same
-	// follow-up note.
+	// The adapter (subprocess-per-turn) runtime does NOT consult this
+	// field.
 	//
 	// macOS caveat: MemoryMax is silently dropped (RLIMIT_AS unavailable
 	// via bash's ulimit -v on darwin and systemd-run is linux-only).

@@ -12,14 +12,20 @@ logic, ships no persistence, and never imports Tether, Torque or Nanite.
 - Each package's `doc.go` is its contract rather than a summary. Read it before
   the implementation.
 - `agentcontext/` resolves typed slot sources into a deterministic boot body.
-  `composer.go` walks the slot list; `hash.go` canonicalizes the request.
-- `agentlaunch/` owns LaunchPlan → CompiledLaunch → PreparedLaunch.
+  `provider.go` walks the slot list; `hash.go` canonicalizes the request;
+  `composer.go` merges authored recipes into a `ResolvedComposition`.
+- `agentlaunch/` owns LaunchPlan → CompiledLaunch → PreparedLaunch
+  (`launcher/`) and the `PreparedExecution` handoff to session runtimes.
   `matrix/` answers which (runtime, mode) pairs launch, read from the
-  go-providers `registry` (it holds no table), `providerplant/` renders
-  provider-native boot directories, `parity/` is the old-vs-new cutover gate.
+  go-providers `registry` (it holds no table), `providerplant/` renders and
+  materializes provider-native boot directories and maps the permission
+  posture (`PrepareExecution`), `parity/` is the old-vs-new cutover gate.
 - `agentsessions/` runs one agent process. `types.go` defines the Capabilities
-  flags that select the lifecycle shape; `manager.go` owns registration,
-  supervision and attach fan-out.
+  flags that select the lifecycle shape and the StartOptions every runtime
+  takes; `from_adapter.go` (`NewFromAdapter`) routes them to the
+  subprocess-per-turn, PTY, streaming-stdio, jsonrpc-stdio or serve-http
+  runtime; `manager.go` owns registration, terminal-exit watching and attach
+  fan-out.
 - Materialization inputs (`Entry`/`Tree`) and the write engine (staged create,
   `Reconcile`/`Refresh`) live in
   [`go-materialize`](https://github.com/hollis-labs/go-materialize)
@@ -40,15 +46,20 @@ golangci-lint run
 govulncheck ./...
 ```
 
-`.github/workflows/check.yml` runs those five checks on push and on pull request
-to `main`, and is the landing gate. Use `-race` before landing anything in
-`agentsessions`; it's concurrent by design.
+`.github/workflows/check.yml` runs those five checks on push to `main` and on
+every pull request, and is the landing gate. Use `-race` before landing
+anything in `agentsessions`; it's concurrent by design.
+
+Tests that need an agent CLI run the real go-providers adapter against
+go-providers' `providertest` fake binary (captured wire output, or a scripted
+run), not an installed CLI.
 
 ## Boundaries
 
 App-neutrality is a convention here, not a lint rule — nothing fails if you
 break it. No package may import an orchestrator. `agentcontext` is stricter
-still: standard library and `gopkg.in/yaml.v3` only. Persistence is
+still: standard library and go-materialize's `artifact` types only (its
+`skills` subpackage adds `gopkg.in/yaml.v3`). Persistence is
 consumer-owned; the library defines StateSink, AttachmentSink and EventSink and
 ships no implementation of any of them. Adding one is the wrong layer.
 
@@ -74,11 +85,15 @@ no runtime-kind enum here and no alias for the old spellings (`subprocess`,
 `serve-http`, `pty-debug`). A runtime added to the registry must resolve with
 no agentkit edit — `TestResolveANewRegistryRuntime` (runtimebind) and
 `TestANewRegistryRuntimeResolves` (matrix) guard it. Planting a new native
-runtime still needs one edit: a constructor case in providerplant's
-`DefaultResolver`, the one per-runtime switch left (it returns
-`ErrNoNativeAdapter` until then; CW-20260930-0134). The Tether catalog's own `runtime_kind` tokens are
-translated at the catalog boundary (`mapRuntimeKind`), and nowhere else.
+runtime needs a constructor in go-providers' `provider.NewAdapter` table,
+which providerplant's `DefaultResolver` calls; until one exists it returns
+`ErrNoNativeAdapter` (`TestDefaultResolver_NewNativeRuntimeNeedsAConstructor`).
+The Tether catalog's own `runtime_kind` tokens are translated at the catalog
+boundary (`mapRuntimeKind`), and nowhere else.
 
 At most one `agentsessions.Capabilities` lifecycle flag may be set — PTY,
 StreamingStdio, JsonRpcStdio and ServeHTTP are mutually exclusive. Any Runtime
-added here has to pass the `agentsessions/compliance` suite.
+added here has to pass the `agentsessions/compliance` suite, open its session
+log through `openSessionLog` (append-only, never truncated: a host such as
+Torque appends its own lines to the same file), and read child output through
+`readLines`, which skips a line over 64 MiB instead of stalling the pipe.

@@ -1,27 +1,40 @@
 // Package agentsessions provides a long-lived agent-session abstraction
 // over the hollis-labs Go primitive libraries.
 //
-// A Session is the running handle for one agent. Five lifecycle shapes
-// are supported, selected by Capabilities flags on the adapter config:
+// A Session is the running handle for one agent. Six lifecycle shapes
+// are supported. NewFromAdapter selects one of the first five from the
+// Capabilities flags on AdapterRuntimeConfig (the runtimes.Mode each one
+// drives is in parentheses):
 //
-//   - turn-based subprocess (default — runner.Run per SendInput)
-//   - long-lived PTY (Caps.PTY) — TUI driven over a creack/pty master
-//   - long-lived streaming stdio (Caps.StreamingStdio) — NDJSON over
-//     stdin/stdout (Claude `claude -p --input-format stream-json`)
-//   - long-lived JSON-RPC stdio (Caps.JsonRpcStdio) — JSON-RPC 2.0 over
-//     stdin/stdout (Codex `app-server`)
-//   - long-lived HTTP server (Caps.ServeHTTP) — child-owned HTTP API
-//     with server-sent events (opencode `serve`)
+//   - turn-based subprocess (default; subprocess-per-turn) — runner.Run
+//     per SendInput
+//   - long-lived PTY (Caps.PTY; pty) — TUI driven over a creack/pty master
+//   - long-lived streaming stdio (Caps.StreamingStdio; streaming-stdio) —
+//     NDJSON over stdin/stdout (Claude `claude -p --input-format stream-json`)
+//   - long-lived JSON-RPC stdio (Caps.JsonRpcStdio; jsonrpc-stdio) —
+//     JSON-RPC 2.0 over stdin/stdout (Codex `app-server`)
+//   - long-lived HTTP server (Caps.ServeHTTP; http-sse) — child-owned HTTP
+//     API with server-sent events (opencode `serve`)
 //   - HTTP-streamed (llmcontracts.Provider directly, via NewFromProvider)
 //
 // PTY / StreamingStdio / JsonRpcStdio / ServeHTTP are mutually exclusive
 // — at most one lifecycle flag may be true on a single Capabilities value. All
 // shapes expose the same Session interface — Wait, Stop, SendInput,
 // Resize, Health, CheckpointHints — so consumers (agent-mux, clockwork,
-// nanite) can drive any of them uniformly. The JsonRpc runtime
-// additionally implements JsonRpcCaller (Call(method, params) → result)
-// for typed request/response correlation; SendInput remains the
-// raw-bytes escape hatch.
+// nanite) can drive any of them uniformly.
+//
+// Optional capabilities are separate interfaces a caller type-asserts:
+//
+//   - JsonRpcCaller (JSON-RPC runtime): Call(method, params) → result for
+//     typed request/response correlation; SendInput remains the raw-bytes
+//     escape hatch. The session's own request ids start at 2^32, so they
+//     never collide with raw frames a host numbers from 1.
+//   - TurnInterrupter: InterruptTurn ends the turn in flight and keeps the
+//     process, so the next SendInput runs on the same process. The
+//     streaming-stdio (Claude control_request), JSON-RPC (Codex
+//     turn/interrupt) and serve-http (OpenCode abort) sessions implement it;
+//     an adapter with no interrupt returns ErrInterruptUnsupported.
+//   - SessionIDer, CheckpointHinter, PIDReporter, SandboxOutcomeReporter.
 //
 // A Manager registers Sessions, persists state transitions through
 // caller-supplied sinks, watches for terminal exits, and broadcasts
@@ -29,13 +42,17 @@
 //
 // # Composition
 //
-//   - go-providers / go-llm-contracts — llmcontracts.Provider (long-lived,
-//     e.g. PTY/HTTP) or provider.CLIAdapter (per-turn subprocess parsing).
-//     The library wraps each shape into a Session via NewFromProvider /
-//     NewFromAdapter.
+//   - go-providers / go-llm-contracts — llmcontracts.Provider (an HTTP
+//     API, via NewFromProvider) or provider.CLIAdapter (every CLI runtime,
+//     per-turn or long-lived, via NewFromAdapter).
 //   - go-runner — runner.Run drives the per-turn subprocess case.
-//   - go-sandbox — sandbox.Profile travels via StartOptions.Profile and is
-//     applied by go-runner under the hood.
+//   - go-sandbox — the effective sandbox comes from
+//     StartOptions.PreparedExecution (its Access), SandboxPolicy, or the
+//     legacy Profile, and is applied at every spawn. DenyGUILaunch and
+//     ProtectedPaths are merged into it and fail the launch where they
+//     cannot be enforced rather than running unconfined.
+//   - agentlaunch — StartOptions.PreparedExecution and StartOptions.Launch
+//     carry a prepared launch's exact bindings and per-turn argv template.
 //   - go-egress-proxy — NOT a dep. Consumers wanting allowlisted egress
 //     start an egress.Proxy themselves and merge its env vars into
 //     StartOptions.Env before calling Manager.Start.
@@ -43,6 +60,30 @@
 // Persistence is consumer-owned: this library defines StateSink,
 // AttachmentSink, and EventSink interfaces and ships none of their
 // implementations.
+//
+// # Output and session logs
+//
+// The long-lived runtimes (PTY, streaming stdio, JSON-RPC stdio, serve-http)
+// read child output line by line. A line longer than 64 MiB is read
+// through, skipped and logged rather than routed, so the child never blocks
+// on a full pipe. In the streaming-stdio and JSON-RPC runtimes a reader that
+// fails for any other reason marks the session unusable: Health reports it
+// not alive and input fails at once.
+//
+// The long-lived runtimes also require StartOptions.LogPath or WorkspaceDir
+// (then <WorkspaceDir>/logs/session.log). The log is opened for appending
+// and never truncated, so a host's own writer on the same file keeps its
+// lines; a host that wants a fresh log per session passes a fresh path.
+//
+// # Turn failures on the subprocess runtime
+//
+// With an adapter that classifies them, a resume turn whose provider
+// session is gone fails with *SessionLostError (errors.Is
+// provider.ErrProviderSessionLost), one that resumed into a new session
+// reports events.SessionLost and OnProviderSessionLost, and a sign-in
+// failure wraps provider.ErrProviderNotAuthenticated and reports
+// events.AuthFailed (EndTurnOnAuthFailure ends that turn early). Permission
+// denials parsed from the stream are marked on the byte Fanout.
 //
 // # Process-level State enum
 //
@@ -53,7 +94,9 @@
 // # Single-turn-in-flight
 //
 // SendInput is serialized per-Session by the Manager via a per-entry lock,
-// matching the mux runtime contract. NewFromProvider / NewFromAdapter
-// implementations additionally surface ErrTurnInFlight if a second
-// SendInput arrives before the first turn's terminal event has flushed.
+// matching the mux runtime contract. The subprocess-per-turn, serve-http and
+// NewFromProvider runtimes additionally surface ErrTurnInFlight if a second
+// SendInput arrives before the first turn's terminal event has flushed. The
+// PTY, streaming-stdio and JSON-RPC runtimes write input straight to the
+// long-lived child, which owns its own turn boundaries.
 package agentsessions

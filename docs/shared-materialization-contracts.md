@@ -2,6 +2,8 @@
 
 Status: M01 contract baseline for Torque task `CW-20260906-0004`.
 
+> Point-in-time record. The `artifact` and `materialize` packages named here live in [`go-materialize`](https://github.com/hollis-labs/go-materialize), not in agentkit, and `providerplant.Plant` delegates to the shared engine through `providerplant.PrepareExecution`. The package `doc.go` files describe the current surface.
+
 M17 adoption handoff: see `docs/shared-materialization-handoff.md` for the final dependency closure, migration mapping and release sequence.
 
 This document records the library ownership and compatibility matrix for the shared composition, materialization and prepared-execution work. It is intentionally narrower than the approved architecture: it fixes concrete package surfaces for implementation tasks without reopening app adoption or release work.
