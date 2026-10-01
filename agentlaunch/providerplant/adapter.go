@@ -27,12 +27,13 @@ type AdapterResolver func(*agentlaunch.CompiledLaunch) (provider.BootDirProvider
 // Codex jsonrpc-stdio projects app-server (whose BootDirSpec suppresses
 // --cd).
 //
-// The launch's permission posture is then set where the adapter takes one:
-// Claude's PermissionMode (planted as permissions.defaultMode; empty leaves a
-// headless claude waiting on its first approval prompt) and Codex's
-// ApprovalPolicy. OpenCode's agent is AgentSpec.Name, falling back to
-// AgentSpec.ID, the same precedence Prepare uses for
-// PreparedPlantContext.AgentName.
+// OpenCode's agent is AgentSpec.Name, falling back to AgentSpec.ID, the same
+// precedence Prepare uses for PreparedPlantContext.AgentName.
+//
+// The launch's permission posture is not set on the adapter. PrepareExecution
+// maps plan.Provider.Permission through the go-providers registry's Posture
+// hook onto launch flags and environment, whichever resolver supplied the
+// adapter (see launchPosture).
 //
 // An ACP mode (Copilot, Pi, or ACP selected for any runtime) has no boot dir
 // and returns ErrNoNativeAdapter, as does a runtime and mode with no native
@@ -54,16 +55,7 @@ func DefaultResolver(compiled *agentlaunch.CompiledLaunch) (provider.BootDirProv
 	if err != nil {
 		return nil, fmt.Errorf("%w: go-providers has no native adapter constructor for %s/%s (%v); pass WithAdapter or WithResolver", ErrNoNativeAdapter, desc.ProviderID, plan.Runtime, err)
 	}
-	switch a := adapter.(type) {
-	case *provider.ClaudeAdapter:
-		// plan.Provider.Permission is in claude's vocabulary
-		// (default/acceptEdits/plan/bypassPermissions).
-		a.PermissionMode = plan.Provider.Permission
-	case *provider.CodexAdapter:
-		// codex vocabulary: untrusted/on-failure/on-request/never. An empty
-		// value is safe — go-providers defaults ApprovalPolicy to "never".
-		a.ApprovalPolicy = plan.Provider.Permission
-	case *provider.OpencodeAdapter:
+	if a, ok := adapter.(*provider.OpencodeAdapter); ok {
 		a.Agent = agentName(plan)
 	}
 	bootDir, ok := adapter.(provider.BootDirProvider)

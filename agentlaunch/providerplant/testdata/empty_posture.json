@@ -1,0 +1,157 @@
+{
+  "antigravity/subprocess-per-turn": {
+    "argv": [
+      "agy",
+      "--output-format",
+      "stream-json",
+      "--flag-a",
+      "--injected",
+      "--add-dir",
+      "\u003cproject\u003e",
+      "-p=TASK-KICKOFF"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {}
+  },
+  "claude/pty": {
+    "argv": [
+      "claude",
+      "--mcp-config",
+      "\u003cboot\u003e/.mcp.json",
+      "--flag-a",
+      "--injected",
+      "--add-dir",
+      "\u003cproject\u003e"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {}
+  },
+  "claude/streaming-stdio": {
+    "argv": [
+      "claude",
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--mcp-config",
+      "\u003cboot\u003e/.mcp.json",
+      "--flag-a",
+      "--injected",
+      "--add-dir",
+      "\u003cproject\u003e"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {}
+  },
+  "claude/subprocess-per-turn": {
+    "argv": [
+      "claude",
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--mcp-config",
+      "\u003cboot\u003e/.mcp.json",
+      "--flag-a",
+      "--injected",
+      "--add-dir",
+      "\u003cproject\u003e",
+      "--",
+      "TASK-KICKOFF"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {}
+  },
+  "codex/jsonrpc-stdio": {
+    "argv": [
+      "codex",
+      "app-server",
+      "--flag-a",
+      "--injected"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {
+      "CODEX_HOME": "\u003cboot\u003e"
+    }
+  },
+  "codex/subprocess-per-turn": {
+    "argv": [
+      "codex",
+      "exec",
+      "--flag-a",
+      "--injected",
+      "--json",
+      "--skip-git-repo-check",
+      "--cd",
+      "\u003cproject\u003e",
+      "--",
+      "TASK-KICKOFF"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {
+      "CODEX_HOME": "\u003cboot\u003e"
+    }
+  },
+  "opencode/http-sse": {
+    "argv": [
+      "opencode",
+      "serve",
+      "--port",
+      "0",
+      "--hostname",
+      "127.0.0.1",
+      "--flag-a",
+      "--injected"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {
+      "OPENCODE_CONFIG_DIR": "\u003cboot\u003e"
+    }
+  },
+  "opencode/subprocess-per-turn": {
+    "argv": [
+      "opencode",
+      "run",
+      "--format",
+      "json",
+      "--agent",
+      "agent-name",
+      "--dir",
+      "\u003cproject\u003e",
+      "--flag-a",
+      "--injected",
+      "--",
+      "TASK-KICKOFF"
+    ],
+    "extra_args": [
+      "--flag-a",
+      "--injected"
+    ],
+    "env": {
+      "OPENCODE_CONFIG_DIR": "\u003cboot\u003e"
+    }
+  }
+}
