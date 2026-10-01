@@ -537,6 +537,9 @@ type StartOptions struct {
 	//     implements the optional provider.EventParser interface. Adapters
 	//     without EventParser produce no typed events through this callback
 	//     (the legacy EventFanout surface still receives ParseLine output).
+	//     The streaming-stdio runtime also reports its own
+	//     events.SessionLost when a resume attempt fails because the provider
+	//     lost the session, whatever the adapter parses.
 	//   - Adapter runtime (subprocess-per-turn): the callback fires per
 	//     stdout line when the adapter implements provider.EventParser (the
 	//     adapter is tapped for the turn, so typed events arrive in line

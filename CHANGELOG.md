@@ -4,6 +4,44 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.21.1 — 2026-10-01
+
+### Fixed
+
+- **A streaming-stdio session reports a lost provider session**
+  (CW-20261001-0222). v0.20.2's session-lost handling covered only the
+  per-turn runtime. A Claude streaming session started to resume an id
+  Claude no longer has sees the child write "No conversation found with
+  session ID" to stderr and exit 1; the only output on the stream was an
+  error result with an empty message, so nothing said the session was lost
+  and go-agent-wrapper's `session.lost` never fired for the runtime every
+  Torque Claude profile uses.
+  - A resume attempt of an adapter that implements
+    `provider.SessionLostClassifier` now keeps a bounded tail of its stderr
+    (through a pipe the session owns; the caller's `StartOptions.Stderr`, or
+    the session log, still receives every byte). When the attempt exits
+    abnormally the tail is classified. A clean exit, an adapter with no
+    classifier, and an attempt that requested no resume id are never
+    classified and behave as before.
+  - On a loss the session emits `events.SessionLost` through
+    `TypedEventCallback` and the `[session_lost]` Fanout marker, once, with
+    the per-turn runtime's reason, after the child's final output. The dead
+    id is dropped from `ProviderSessionID`. `OnProviderSessionLost` is not
+    called, as for a failed per-turn resume.
+  - `SendInput` then fails with `*SessionLostError`, which still matches
+    `ErrNoInputChannel`. A `SendInput` whose write fails because the child
+    just died waits up to three seconds for the classification and returns
+    the same error, wrapping the write error, instead of a broken pipe.
+  - A lost session is not restarted by the supervisor: the restart would
+    resume the same dead id. Without this, `RestartOnCrash` would have
+    respawned it until exhausted.
+  - `Wait`'s error is unchanged (still the `*ExitError`).
+  - Tested by replaying go-providers' live `claude/stream_resume_unknown_id`
+    capture through the real Claude streaming adapter, with and without a
+    supervisor, plus a stand-in CLI that stops reading stdin so the write
+    fails. The adapter without a classifier, a run with no resume id, and a
+    clean exit stay silent.
+
 ## v0.20.6 — 2026-10-01
 
 ### Fixed
