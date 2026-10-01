@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,9 +43,22 @@ func ocDelta(text string) string {
 }
 
 // startScriptedServe runs a serve-http session against an OpenCode stand-in
-// that answers the first prompt by streaming turn.
+// that answers the first prompt by streaming turn, and sends that prompt.
 func startScriptedServe(t *testing.T, turn []string) <-chan llmtypes.StreamEvent {
 	t.Helper()
+	sess, fanout := startScriptedServeTurns(t, turn)
+	if err := sess.SendInput(context.Background(), []byte("hi")); err != nil {
+		t.Fatalf("SendInput: %v", err)
+	}
+	return fanout
+}
+
+// startScriptedServeTurns runs a serve-http session against an OpenCode
+// stand-in that answers the n-th prompt by streaming turns[n]. It sends no
+// prompt itself.
+func startScriptedServeTurns(t *testing.T, turns ...[]string) (Session, <-chan llmtypes.StreamEvent) {
+	t.Helper()
+	var prompts atomic.Int32
 	events := make(chan string, 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -66,7 +80,11 @@ func startScriptedServe(t *testing.T, turn []string) <-chan llmtypes.StreamEvent
 			}
 		case strings.HasSuffix(r.URL.Path, "/prompt_async"):
 			w.WriteHeader(http.StatusNoContent)
-			for _, ev := range turn {
+			n := int(prompts.Add(1)) - 1
+			if n >= len(turns) {
+				return
+			}
+			for _, ev := range turns[n] {
 				events <- ev
 			}
 		default:
@@ -96,10 +114,7 @@ func startScriptedServe(t *testing.T, turn []string) <-chan llmtypes.StreamEvent
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() { _ = sess.Stop(context.Background()); _, _ = sess.Wait() })
-	if err := sess.SendInput(context.Background(), []byte("hi")); err != nil {
-		t.Fatalf("SendInput: %v", err)
-	}
-	return fanout
+	return sess, fanout
 }
 
 // turnEnd collects events until the turn's first terminal event, then

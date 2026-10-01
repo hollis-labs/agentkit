@@ -4,6 +4,25 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.21.2 — 2026-10-01
+
+### Fixed
+
+- **A serve-http (OpenCode) session no longer grows two maps for the life
+  of the session** (CW-20261001-0224). The ids of reasoning parts (v0.20.6)
+  and of compaction summary messages (v0.20.5) were kept forever, though
+  each is unique and matters only for the deltas of its own turn. They are
+  now forgotten when the next turn starts, so a session keeps one turn's
+  worth.
+  - They are cleared when the next turn starts, not when one ends, so a
+    delta that follows its turn's ending event (OpenCode sends late events
+    after an abort) is still told from the reply. A delta that arrives only
+    after the next prompt was sent is the one case this does not cover.
+  - Tested over 60 turns with fresh ids each: every turn's thinking, held
+    back summary and reply are still told apart, and the maps hold one
+    turn's ids at the end. Clearing at turn end, clearing only one of the
+    two maps, and not clearing each fail a test.
+
 ## v0.21.0 — 2026-10-01
 
 `StartOptions.ExtraArgs` go where the adapter's convention takes them
