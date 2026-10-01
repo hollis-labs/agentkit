@@ -216,9 +216,11 @@ type serveHTTPSession struct {
 	overflow []byte
 
 	// compactionMessages are the ids of OpenCode's compaction summary
-	// messages, whose deltas are not the reply.
+	// messages, whose deltas are not the reply; reasoningParts are the ids
+	// of reasoning parts, whose deltas are the model thinking.
 	compactionMu       sync.Mutex
 	compactionMessages map[string]bool
+	reasoningParts     map[string]bool
 
 	streamCancel context.CancelFunc
 }
@@ -546,13 +548,26 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 		if ev.Properties.Info.isCompaction() {
 			s.markCompactionMessage(ev.Properties.Info.ID)
 		}
+	case "message.part.updated":
+		if ev.Properties.Part.Type == "reasoning" && ev.Properties.Part.ID != "" {
+			s.markReasoningPart(ev.Properties.Part.ID)
+		}
 	case "message.part.delta", "session.next.text.delta":
 		// A compaction summary streams as this session's deltas too, but
 		// it is OpenCode condensing the context, not the reply; it stays
 		// in the raw event stream above (CW-20261001-0198).
-		if ev.Properties.Delta != "" && !s.isCompactionMessage(ev.Properties.MessageID) {
-			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: ev.Properties.Delta})
+		if ev.Properties.Delta == "" || s.isCompactionMessage(ev.Properties.MessageID) {
+			break
 		}
+		delta := llmtypes.StreamEvent{Type: llmtypes.EventDelta, Content: ev.Properties.Delta}
+		// A reasoning part's text streams as the same delta event; only
+		// its message.part.updated says it is the model thinking, not the
+		// reply (CW-20261001-0209).
+		if s.isReasoningPart(ev.Properties.PartID) {
+			delta.Phase = llmtypes.PhaseThinking
+			delta.BlockID = ev.Properties.PartID
+		}
+		tryEventFanout(s.opts.EventFanout, delta)
 	case "session.status":
 		if ev.Properties.Status.Type == "busy" {
 			s.turnMu.Lock()
@@ -604,8 +619,10 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 type sseProperties struct {
 	SessionID string         `json:"sessionID"`
 	MessageID string         `json:"messageID"`
+	PartID    string         `json:"partID"`
 	Delta     string         `json:"delta"`
 	Info      sseMessageInfo `json:"info"`
+	Part      ssePart        `json:"part"`
 	Status    struct {
 		Type string `json:"type"`
 	} `json:"status"`
@@ -620,6 +637,13 @@ type sseMessageInfo struct {
 	Mode    string          `json:"mode"`
 	Agent   string          `json:"agent"`
 	Summary json.RawMessage `json:"summary"`
+}
+
+// ssePart is the part a message.part.updated event describes: its id and
+// type ("text", "reasoning", "tool", "step-start", ...).
+type ssePart struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
 }
 
 // isCompaction reports whether the message is OpenCode's compaction summary:
@@ -637,6 +661,24 @@ func (s *serveHTTPSession) markCompactionMessage(id string) {
 		s.compactionMessages = map[string]bool{}
 	}
 	s.compactionMessages[id] = true
+}
+
+func (s *serveHTTPSession) markReasoningPart(id string) {
+	s.compactionMu.Lock()
+	defer s.compactionMu.Unlock()
+	if s.reasoningParts == nil {
+		s.reasoningParts = map[string]bool{}
+	}
+	s.reasoningParts[id] = true
+}
+
+func (s *serveHTTPSession) isReasoningPart(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.compactionMu.Lock()
+	defer s.compactionMu.Unlock()
+	return s.reasoningParts[id]
 }
 
 func (s *serveHTTPSession) isCompactionMessage(id string) bool {
