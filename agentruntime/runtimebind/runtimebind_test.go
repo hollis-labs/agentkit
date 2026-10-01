@@ -132,3 +132,22 @@ func TestResolveANewRegistryRuntime(t *testing.T) {
 		t.Fatalf("fake acp = %+v, %v", b, err)
 	}
 }
+
+// The registry is consulted before the API-name heuristic: a runtime id or
+// alias containing "openai" or "anthropic" is still a runtime.
+func TestResolveRegistryWinsOverTheAPIHeuristic(t *testing.T) {
+	registry.RegisterForTest(t, registry.Descriptor{
+		ID:          "openai-codex-cli",
+		Aliases:     []string{"anthropic-agent"},
+		Binary:      "openai-codex-cli",
+		EnvOverride: "OPENAI_CODEX_CLI_PATH",
+		Modes:       []registry.ModeSupport{{Mode: runtimes.ModeSubprocessPerTurn}},
+		DefaultMode: runtimes.ModeSubprocessPerTurn,
+	})
+	for _, name := range []string{"openai-codex-cli", "anthropic-agent"} {
+		b, err := Resolve(Request{Provider: name})
+		if err != nil || b.API || b.Provider != "openai-codex-cli" || b.Runtime != runtimes.ModeSubprocessPerTurn {
+			t.Errorf("%s = %+v, %v; want the registry runtime, not an API binding", name, b, err)
+		}
+	}
+}

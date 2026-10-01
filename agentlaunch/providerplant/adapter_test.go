@@ -3,10 +3,12 @@ package providerplant
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
 	"github.com/hollis-labs/go-providers/provider"
+	"github.com/hollis-labs/go-providers/registry"
 
 	"github.com/hollis-labs/agentkit/agentlaunch/launcher"
 )
@@ -105,6 +107,25 @@ func TestDefaultResolver_ACPOnlyHasNoNativeAdapter(t *testing.T) {
 		if _, err := DefaultResolver(compiledFor(t, id, runtimes.ModeACPStdio)); !errors.Is(err, ErrNoNativeAdapter) {
 			t.Errorf("%s: err = %v, want ErrNoNativeAdapter", id, err)
 		}
+	}
+}
+
+// A registry runtime with a native mode resolves in the matrix, but planting
+// it still needs a constructor case in DefaultResolver (CW-20260930-0134); the
+// error says so instead of claiming the runtime is ACP-only.
+func TestDefaultResolver_NewNativeRuntimeNeedsAConstructor(t *testing.T) {
+	registry.RegisterForTest(t, registry.Descriptor{
+		ID:          "fake-cli",
+		Binary:      "fake-cli",
+		EnvOverride: "FAKE_CLI_PATH",
+		Modes:       []registry.ModeSupport{{Mode: runtimes.ModeSubprocessPerTurn}},
+		DefaultMode: runtimes.ModeSubprocessPerTurn,
+	})
+	compiled := compiledFor(t, "claude", runtimes.ModeSubprocessPerTurn)
+	compiled.Plan.Provider.ID = "fake-cli"
+	_, err := DefaultResolver(compiled)
+	if !errors.Is(err, ErrNoNativeAdapter) || !strings.Contains(err.Error(), "no native adapter constructor") || strings.Contains(err.Error(), "ACP") {
+		t.Fatalf("DefaultResolver(fake-cli) = %v, want ErrNoNativeAdapter naming the missing constructor", err)
 	}
 }
 

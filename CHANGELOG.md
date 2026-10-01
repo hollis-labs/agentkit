@@ -6,10 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## v0.12.0 — 2026-10-01
 
-Minor, breaking (pre-1.0). Pairs with go-providers v0.31.0 and adds a
+Minor, breaking (pre-1.0). Pairs with go-providers v0.32.0 and adds a
 dependency on agent-contracts-leaf v0.3.0. agentkit now reads its runtimes
 from the go-providers registry (CW-20260930-0133, EP-20260930-0001): a runtime
-added there resolves and launches here with no agentkit edit.
+added there resolves here with no agentkit edit; planting a new native
+runtime's boot dir still needs a `DefaultResolver` constructor case.
 
 ### Changed
 
@@ -29,8 +30,26 @@ added there resolves and launches here with no agentkit edit.
     was `subprocess`. The debug posture still prefers a runtime's PTY.
   - Supported modes come from the registry.
   - An API provider is a `Binding` with `API: true` and no mode, not a
-    runtime kind.
+    runtime kind. The registry is consulted first, so a runtime whose id or
+    alias contains "openai"/"anthropic" stays a runtime.
   - `Request.Overrides` is keyed by `runtimes.ID`.
+- **Behavior change for Codex hosts (D-74 default flip):**
+  - A host that resolves Codex's *default* mode and then calls
+    `ResolveCodexPolicy` with `Bypass: true` (or uses the debug posture) now
+    gets `danger-full-access` where it used to get `workspace-write`. Bypass
+    applies in app-server mode, which is now the default.
+  - Codex app-server runs with cwd = the boot dir and no `--cd`. The project
+    reaches Codex only through `turn.CodexAppServerOptions.CWD`, so a host
+    moving to the default must set `CWD`.
+- **Breaking:** `runtimebind.ResolveCodexPolicy` returns
+  `(CodexPolicy, error)`. A `Runtime` that is not a `runtimes.Mode` (the old
+  `app-server`/`subprocess` spellings) is `ErrUnsupportedBinding` instead of
+  a silent `workspace-write`.
+- `turn.Frame`/`SendTurn` with an API binding (empty mode) now return
+  `ErrUnsupportedRuntime`; the old `runtimekind.API` framed raw text.
+- `LaunchPlan.Validate` and `RuntimeBinding.Validate` wrap
+  `ErrUnknownRuntime` with the offending value, so a persisted `subprocess`
+  says what it got.
 - **Breaking:** `matrix` holds no table. `Lookup`, `IsSupported`,
   `Supported` and `KnownProviders` read the registry. `Descriptor` carries
   `ProviderID runtimes.ID`, `Runtime runtimes.Mode`, `BinaryName` and the
@@ -51,6 +70,9 @@ added there resolves and launches here with no agentkit edit.
   launches no longer share a group.
 - providerplant no longer patches `--add-dir <project>` into the projected
   argv: go-providers v0.31.0's Claude convention carries it in every mode.
+  OpenCode's http-sse launch no longer gets `--dir <project>` appended either.
+  That is harmless: `opencode serve` has no `--dir`, and its cwd is already
+  the project.
 
 ### Added
 
@@ -60,8 +82,9 @@ added there resolves and launches here with no agentkit edit.
   `Provider.Flags`/`Injection.Args` must be an option. They follow the
   projected argv, whose last flag can be variadic (Claude's `--add-dir`,
   `--mcp-config`) and would swallow a positional.
-- `providerplant.ErrNoNativeAdapter`: `DefaultResolver` for an ACP-only
-  runtime (Copilot, Pi) or one it builds no adapter for.
+- `providerplant.ErrNoNativeAdapter`: `DefaultResolver` for an ACP mode (no
+  boot dir) or for a registry runtime it has no constructor for. That is the
+  one edit a new native runtime still needs in agentkit (CW-20260930-0134).
 
 ### Removed
 

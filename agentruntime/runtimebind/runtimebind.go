@@ -67,7 +67,10 @@ type Binding struct {
 // unless AllowPTY or the debug posture is explicit.
 func Resolve(req Request) (Binding, error) {
 	name := normalizeProvider(req.Provider)
-	if req.Posture == PostureAPI || isAPIProvider(name) {
+	// The registry wins over the API-name heuristic: a runtime id or alias
+	// that happens to contain "openai" or "anthropic" is still a runtime.
+	d, known := registry.Lookup(name)
+	if req.Posture == PostureAPI || (!known && isAPIProvider(name)) {
 		if req.RequestedRuntime != "" {
 			return Binding{}, fmt.Errorf("%w: API provider %q has no runtime mode, got %q", ErrUnsupportedBinding, req.Provider, req.RequestedRuntime)
 		}
@@ -79,7 +82,6 @@ func Resolve(req Request) (Binding, error) {
 		return Binding{}, fmt.Errorf("%w: %q is not a runtime mode", ErrUnsupportedBinding, mode)
 	}
 
-	d, known := registry.Lookup(name)
 	if !known {
 		if !req.AllowGenericSubprocess {
 			return Binding{}, fmt.Errorf("%w: unknown provider %q", ErrUnsupportedBinding, req.Provider)

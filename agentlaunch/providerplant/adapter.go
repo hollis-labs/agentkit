@@ -30,11 +30,10 @@ type AdapterResolver func(*agentlaunch.CompiledLaunch) (provider.BootDirProvider
 //     NewOpencodeAdapterServeHTTP() in http-sse, with Agent set
 //   - antigravity → provider.NewAntigravityAdapter()
 //
-// A runtime without a layout (ACP-only: Copilot, Pi) has no boot dir and
-// returns ErrNoNativeAdapter, as does a registry runtime this switch does not
-// build; constructing a native adapter needs that adapter's own fields, so it
-// stays here until the launch factories move to go-agent-wrapper
-// (CW-20260930-0134).
+// An ACP mode (Copilot, Pi, or ACP selected for any runtime) has no boot dir
+// and returns ErrNoNativeAdapter. So does a registry runtime this switch does
+// not build: constructing a native adapter needs that adapter's own fields,
+// so a new native runtime still needs a case here (CW-20260930-0134).
 //
 // The agent name fed to the opencode adapter is AgentSpec.Name, falling
 // back to AgentSpec.ID — the same precedence Prepare uses for
@@ -55,8 +54,8 @@ func DefaultResolver(compiled *agentlaunch.CompiledLaunch) (provider.BootDirProv
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrAdapterResolution, err)
 	}
-	if !desc.Registry.HasLayout() {
-		return nil, fmt.Errorf("%w: %s has no boot-dir layout (ACP-only)", ErrNoNativeAdapter, desc.ProviderID)
+	if plan.Runtime.ACP() {
+		return nil, fmt.Errorf("%w: %s/%s runs over ACP and has no boot dir to plant", ErrNoNativeAdapter, desc.ProviderID, plan.Runtime)
 	}
 	switch desc.ProviderID {
 	case runtimes.Claude:
@@ -97,7 +96,9 @@ func DefaultResolver(compiled *agentlaunch.CompiledLaunch) (provider.BootDirProv
 		// are per-turn argv owned by the consumer's runtime adapter.
 		return provider.NewAntigravityAdapter(), nil
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrNoNativeAdapter, desc.ProviderID)
+		// The registry knows the runtime, but building its go-providers
+		// adapter is still a per-runtime edit here (CW-20260930-0134).
+		return nil, fmt.Errorf("%w: DefaultResolver has no native adapter constructor for %s (CW-20260930-0134); pass WithAdapter or WithResolver", ErrNoNativeAdapter, desc.ProviderID)
 	}
 }
 

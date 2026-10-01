@@ -71,11 +71,12 @@ agentkit holds no list of runtimes. Which runtimes exist, their aliases,
 binaries, modes, default mode and layout come from the go-providers
 `registry` over the agent-contracts-leaf `runtimes` vocabulary (D-73); there is
 no runtime-kind enum here and no alias for the old spellings (`subprocess`,
-`serve-http`, `pty-debug`). A runtime added to the registry must resolve and
-launch with no agentkit edit — `TestResolveANewRegistryRuntime` (runtimebind)
-and `TestANewRegistryRuntimeIsLaunchable` (matrix) guard it. The one
-per-runtime switch left is providerplant's `DefaultResolver`, which builds the
-go-providers adapter. The Tether catalog's own `runtime_kind` tokens are
+`serve-http`, `pty-debug`). A runtime added to the registry must resolve with
+no agentkit edit — `TestResolveANewRegistryRuntime` (runtimebind) and
+`TestANewRegistryRuntimeResolves` (matrix) guard it. Planting a new native
+runtime still needs one edit: a constructor case in providerplant's
+`DefaultResolver`, the one per-runtime switch left (it returns
+`ErrNoNativeAdapter` until then; CW-20260930-0134). The Tether catalog's own `runtime_kind` tokens are
 translated at the catalog boundary (`mapRuntimeKind`), and nowhere else.
 
 At most one `agentsessions.Capabilities` lifecycle flag may be set — PTY,

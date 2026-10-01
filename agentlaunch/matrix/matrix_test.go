@@ -94,9 +94,13 @@ func TestKnownProvidersIsTheRegistry(t *testing.T) {
 	}
 }
 
-// Acceptance (CW-20260930-0133): a runtime added to the registry is
-// launchable here with no edit to this package.
-func TestANewRegistryRuntimeIsLaunchable(t *testing.T) {
+// Acceptance (CW-20260930-0133): a runtime added to the registry resolves
+// here (Lookup, Supported, KnownProviders) with no edit to this package.
+// Planting a new native runtime's boot dir still needs a constructor in
+// providerplant.DefaultResolver (ErrNoNativeAdapter until then;
+// CW-20260930-0134); TestDefaultResolver_NewNativeRuntimeNeedsAConstructor
+// pins that.
+func TestANewRegistryRuntimeResolves(t *testing.T) {
 	registry.RegisterForTest(t, registry.Descriptor{
 		ID:          "fake-cli",
 		Binary:      "fake-cli",

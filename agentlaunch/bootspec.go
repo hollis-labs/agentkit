@@ -63,7 +63,7 @@ func (r RuntimeBinding) Validate() error {
 		return ErrRuntimeBindingMissingProvider
 	}
 	if !r.RuntimeKind.Valid() {
-		return ErrUnknownRuntime
+		return fmt.Errorf("%w: runtime_kind %q is not a runtimes.Mode", ErrUnknownRuntime, r.RuntimeKind)
 	}
 	if r.Timeout != "" {
 		if _, err := time.ParseDuration(r.Timeout); err != nil {

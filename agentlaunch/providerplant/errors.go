@@ -31,9 +31,8 @@ var (
 	ErrPositionalAfterProjection = errors.New("agentlaunch/providerplant: a positional argument would follow the projected argv")
 
 	// ErrNoNativeAdapter is returned by the default resolver when the
-	// launch's runtime has no boot dir to plant (an ACP-only runtime, such
-	// as Copilot or Pi, has no layout) or no go-providers adapter this
-	// package builds. A caller with its own adapter passes WithAdapter or
-	// WithResolver.
+	// launch runs over ACP (no boot dir to plant) or DefaultResolver has no
+	// constructor for the runtime's go-providers adapter. A caller with its
+	// own adapter passes WithAdapter or WithResolver.
 	ErrNoNativeAdapter = errors.New("agentlaunch/providerplant: no native adapter for the runtime")
 )

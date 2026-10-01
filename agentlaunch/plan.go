@@ -1,6 +1,10 @@
 package agentlaunch
 
-import "github.com/hollis-labs/agent-contracts-leaf/runtimes"
+import (
+	"fmt"
+
+	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
+)
 
 // LaunchPlan is the declarative input to the launch pipeline. A
 // LaunchPlan carries everything the catalog port (CW-0003), the
@@ -81,7 +85,7 @@ func (p LaunchPlan) Validate() error {
 		return ErrMissingProviderID
 	}
 	if !p.Runtime.Valid() {
-		return ErrUnknownRuntime
+		return fmt.Errorf("%w: runtime %q is not a runtimes.Mode", ErrUnknownRuntime, p.Runtime)
 	}
 	if !p.Workspace.Mode.Valid() {
 		return ErrUnsupportedWorkspaceMode

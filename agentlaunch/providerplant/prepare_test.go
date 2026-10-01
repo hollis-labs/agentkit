@@ -61,9 +61,12 @@ func TestPrepareAndPlant_WithPlantOption(t *testing.T) {
 	assertExists(t, prepared.PlantedBootDir, "config.toml")
 }
 
-// The projected Claude argv carries --add-dir <project> itself in every
-// mode (go-providers v0.31.0); providerplant appends nothing, so it appears
-// exactly once.
+// The projected Claude argv carries --add-dir <project> itself
+// (go-providers v0.31.0); providerplant appends nothing, so it appears
+// exactly once. Note: DefaultResolver builds a print-mode ClaudeAdapter for
+// every Claude mode today, so all three modes below project the print argv;
+// what this pins is the absence of a second --add-dir, not per-mode argv.
+// That resolver gap is CW-20260930-0134's.
 func TestPrepareExecution_ClaudeProjectDirOnce(t *testing.T) {
 	isolateHome(t)
 	for _, mode := range []runtimes.Mode{runtimes.ModeStreamingStdio, runtimes.ModeSubprocessPerTurn, runtimes.ModePTY} {
