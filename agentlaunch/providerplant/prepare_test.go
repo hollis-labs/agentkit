@@ -3,6 +3,7 @@ package providerplant
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,7 +119,58 @@ func TestPrepareExecution_NoPositionalAfterProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareExecution with a leading option: %v", err)
 	}
-	if argv := exec.Bindings.Argv; argv[len(argv)-2] != "--model" || argv[len(argv)-1] != "sonnet" {
-		t.Errorf("injection args not appended last: %v", argv)
+	if argv := exec.Bindings.Argv; !slices.Contains(argv, "--model") || slices.Index(argv, "--model") > slices.Index(argv, "--") {
+		t.Errorf("injection args not placed among the flags: %v", argv)
+	}
+
+	dashdash := compiledWith(t, "claude", runtimes.ModeStreamingStdio, agentlaunch.InjectionSpec{Args: []string{"--model", "sonnet", "--", "more"}})
+	prepared, err = launcher.Prepare(context.Background(), dashdash)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if _, err := PrepareExecution(context.Background(), prepared); !errors.Is(err, ErrPositionalAfterProjection) {
+		t.Fatalf("PrepareExecution with a \"--\" launch flag = %v, want ErrPositionalAfterProjection", err)
+	}
+}
+
+// Since go-providers v0.34.1 a projected argv with a boot prompt ends in
+// "-- <prompt>". Provider.Flags and Injection.Args must land before that
+// "--": after it they are prompt text, not flags (CW-20261001-0102). Every
+// launch flag precedes "--", in order, and the prompt is last.
+func TestPrepareExecution_LaunchFlagsPrecedeDashDash(t *testing.T) {
+	flags := []string{"--flag-a", "--flag-b", "b-value"}
+	args := []string{"--inj", "inj-value"}
+	for _, c := range []struct {
+		provider string
+		mode     runtimes.Mode
+	}{
+		{"claude", runtimes.ModeSubprocessPerTurn},
+		{"claude", runtimes.ModeStreamingStdio},
+		{"claude", runtimes.ModePTY},
+		{"codex", runtimes.ModeSubprocessPerTurn},
+	} {
+		isolateHome(t)
+		compiled := compiledWith(t, c.provider, c.mode, agentlaunch.InjectionSpec{Args: args})
+		compiled.Plan.Provider.Flags = flags
+		prepared, err := launcher.Prepare(context.Background(), compiled)
+		if err != nil {
+			t.Fatalf("%s/%s: prepare: %v", c.provider, c.mode, err)
+		}
+		exec, err := PrepareExecution(context.Background(), prepared)
+		if err != nil {
+			t.Fatalf("%s/%s: PrepareExecution: %v", c.provider, c.mode, err)
+		}
+		argv := exec.Bindings.Argv
+		dd := slices.Index(argv, "--")
+		if dd < 0 {
+			t.Fatalf("%s/%s: no \"--\" before the boot prompt; this test needs go-providers v0.34.1 or later: %q", c.provider, c.mode, argv)
+		}
+		want := append(append([]string{}, flags...), args...)
+		if dd < len(want) || !slices.Equal(argv[dd-len(want):dd], want) {
+			t.Errorf("%s/%s: launch flags are not immediately before \"--\": %q", c.provider, c.mode, argv)
+		}
+		if got := argv[dd+1:]; !slices.Equal(got, []string{"TASK-KICKOFF"}) {
+			t.Errorf("%s/%s: after \"--\" = %q, want only the boot prompt", c.provider, c.mode, got)
+		}
 	}
 }

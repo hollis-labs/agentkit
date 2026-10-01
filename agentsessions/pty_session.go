@@ -302,9 +302,7 @@ func (s *ptySession) spawnAttempt(attempt int) (*exec.Cmd, *os.File, func(), err
 		}
 	}
 	args := s.adapter.BuildArgs("", systemPrompt, sessionIDPreset)
-	if len(s.opts.ExtraArgs) > 0 {
-		args = append(args, s.opts.ExtraArgs...)
-	}
+	args = withExtraArgs(args, s.opts.ExtraArgs)
 
 	cmd := exec.Command(binary, args...) //nolint:gosec // G204: adapter-sourced binary + args
 	configurePTYCommandProcessGroup(cmd)

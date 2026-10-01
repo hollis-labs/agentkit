@@ -25,9 +25,10 @@ var (
 	ErrNoBootDirSpec = errors.New("agentlaunch/providerplant: adapter does not provide a BootDirSpec")
 
 	// ErrPositionalAfterProjection is returned when the first of the
-	// plan's Provider.Flags and Injection.Args is not an option. They are
-	// appended after the projected argv, which can end in a variadic flag
-	// (Claude's --add-dir) that would swallow the positional.
+	// plan's Provider.Flags and Injection.Args is not an option, or when one
+	// of them is "--". They follow the projected flags, which can end in a
+	// variadic flag (Claude's --add-dir) that would swallow a positional, and
+	// a "--" among them would make every later one a positional.
 	ErrPositionalAfterProjection = errors.New("agentlaunch/providerplant: a positional argument would follow the projected argv")
 
 	// ErrNoNativeAdapter is returned by the default resolver when the

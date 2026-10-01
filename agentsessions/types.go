@@ -617,8 +617,10 @@ type StartOptions struct {
 	// Added in v0.9.0.
 	OnBootDirPlanted func(path string)
 
-	// ExtraArgs, when non-nil, is appended to the runtime's argv after
-	// adapter.BuildArgs(...). Used internally by AutoPlantBootDir to thread
+	// ExtraArgs, when non-nil, is spliced into the runtime's argv after
+	// adapter.BuildArgs(...)'s flags: before its "--" when it has one (a
+	// prompt follows it since go-providers v0.34.1), appended otherwise. An
+	// ExtraArgs that carries its own "--" is appended unchanged. Used internally by AutoPlantBootDir to thread
 	// BootDirSpec.ProjectDirArg through to the spawn (e.g. claude's
 	// `--add-dir <projectDir>`) without changing the adapter contract.
 	// Consumers may also set it directly when they need to splice
