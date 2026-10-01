@@ -408,6 +408,7 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	}
 	if err != nil && canClassifyAuth && stderrTail != nil && authClassifier.IsNotAuthenticated(stderrTail.Bytes()) {
 		err = fmt.Errorf("agentsessions: %w: %w", provider.ErrProviderNotAuthenticated, err)
+		s.reportAuthFailed()
 	}
 	// Secondary signal for an id-keeping adapter: the turn reported no
 	// session id at all, but stderr says the requested session was not
@@ -575,31 +576,48 @@ func (s *adapterSession) reportSessionLost(requested, actual string) {
 	}
 }
 
-// turnAdapter is the adapter handed to go-runner for one turn. When the
-// caller wants typed events and the adapter can produce them, it is tapped
-// so each stdout line also goes through ParseLineEvents; go-runner parses
+// reportAuthFailed announces a turn the adapter's AuthFailureClassifier
+// recognised as a sign-in failure: to the typed-event callback
+// (events.AuthFailed) and the byte Fanout, as an "[auth_failed]" marker. The
+// turn's error already wraps provider.ErrProviderNotAuthenticated.
+func (s *adapterSession) reportAuthFailed() {
+	msg := provider.ErrProviderNotAuthenticated.Error()
+	if s.opts.TypedEventCallback != nil {
+		s.opts.TypedEventCallback(events.AuthFailed{Message: msg})
+	}
+	if s.opts.Fanout != nil {
+		_, _ = fmt.Fprintf(s.opts.Fanout, "\n[auth_failed] %s\n", msg)
+	}
+}
+
+// turnAdapter is the adapter handed to go-runner for one turn. An adapter
+// that can produce typed events is always tapped, so each stdout line also
+// goes through ParseLineEvents: typed-only events (a permission denial has
+// no StreamEvent form) reach the byte Fanout even when no
+// TypedEventCallback is set, and the callback when one is. go-runner parses
 // lines on the turn's goroutine, so typed and legacy events stay in line
 // order.
 func (s *adapterSession) turnAdapter() provider.CLIAdapter {
-	cb := s.opts.TypedEventCallback
 	parser, ok := s.adapter.(provider.EventParser)
-	if cb == nil || !ok {
+	if !ok {
 		return s.adapter
 	}
-	return &typedEventTap{CLIAdapter: s.adapter, parser: parser, cb: cb, fanout: s.opts.Fanout}
+	return &typedEventTap{CLIAdapter: s.adapter, parser: parser, cb: s.opts.TypedEventCallback, fanout: s.opts.Fanout}
 }
 
 type typedEventTap struct {
 	provider.CLIAdapter
 	parser provider.EventParser
-	cb     provider.EventsCallback
+	cb     provider.EventsCallback // nil when the caller did not ask for typed events
 	fanout io.Writer
 }
 
 func (t *typedEventTap) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 	if evs, err := t.parser.ParseLineEvents(line); err == nil {
 		for _, ev := range evs {
-			t.cb(ev)
+			if t.cb != nil {
+				t.cb(ev)
+			}
 			// Permission denials have no StreamEvent form; mark them on
 			// the byte Fanout so an attached reader sees the no-op.
 			if d, ok := ev.(events.PermissionDenied); ok && t.fanout != nil {
