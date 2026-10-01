@@ -178,8 +178,10 @@ type streamingStdioSession struct {
 	// readerFault is set when the stdout reader failed; the session is
 	// then no longer usable.
 	readerFault readerFault
-	startedPID  atomic.Int32
-	lastPID     atomic.Int32
+	// interrupts pairs InterruptTurn requests with the CLI's answers.
+	interrupts interrupts
+	startedPID atomic.Int32
+	lastPID    atomic.Int32
 	// spawnedAt is the most-recent successful cmd.Start time as unix
 	// nanoseconds. Set inside spawnAttempt after cmd.Start; read by the
 	// waiter paths to compute elapsed-since-spawn for the abnormal-wait
@@ -359,9 +361,13 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 	}
 
 	_, hasParser := s.adapter.(provider.EventParser)
+	interrupter, canInterrupt := s.adapter.(provider.TurnInterrupter)
 
 	err := readLines(stdout, func(raw []byte) {
 		s.tickActivity()
+		if canInterrupt {
+			s.interrupts.observe(interrupter, raw)
+		}
 		line := make([]byte, len(raw)+1)
 		copy(line, raw)
 		line[len(raw)] = '\n'
@@ -394,6 +400,8 @@ func (s *streamingStdioSession) runReaderLoop(stdout io.Reader) {
 	if readerFailed(err) {
 		failReader(&s.readerFault, "streaming-stdio", s.runtime.cfg.ID, err, stdout)
 	}
+	// No answer can arrive on this output any more.
+	s.interrupts.failAll(ErrInterruptUnanswered)
 }
 
 // childOutputDrainTimeout bounds how long a waiter keeps reading a child's
