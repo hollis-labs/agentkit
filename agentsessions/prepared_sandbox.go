@@ -21,6 +21,10 @@ var (
 	// ErrGUILaunchDenyUnsupported means StartOptions.DenyGUILaunch was set but
 	// this platform or runtime cannot enforce it, so the launch is refused rather than run unconfined.
 	ErrGUILaunchDenyUnsupported = errors.New("agentsessions: DenyGUILaunch cannot be enforced")
+	// ErrProtectedPathsUnsupported means StartOptions.ProtectedPaths was set
+	// but this platform or runtime cannot write-protect them, so the launch is
+	// refused rather than run with the control plane writable.
+	ErrProtectedPathsUnsupported = errors.New("agentsessions: ProtectedPaths cannot be enforced")
 )
 
 // SandboxOutcome is the session-runtime view of OS confinement for a child.
@@ -133,7 +137,78 @@ func normalizeStartOptions(opts StartOptions) (StartOptions, error) {
 	if opts.SandboxPolicy != nil && opts.SandboxPolicy.ID == "" {
 		return StartOptions{}, errors.New("agentsessions: StartOptions.SandboxPolicy.ID is required")
 	}
+	opts, err := applyProtectedPaths(opts)
+	if err != nil {
+		return StartOptions{}, err
+	}
 	return applyGUILaunchDeny(opts)
+}
+
+// minimalProtectProfileID names the host-filesystem profile that carries only
+// the protected paths when the caller supplied no sandbox of its own.
+const minimalProtectProfileID = "protect-control-plane"
+
+// applyProtectedPaths folds StartOptions.ProtectedPaths into the one sandbox
+// that will wrap the child, as applyGUILaunchDeny does for its knob: onto an
+// existing SandboxPolicy or Profile (copies, so the caller's values are not
+// mutated), and only when there is neither (or the policy is disabled) does it
+// install a minimal host-filesystem profile. It runs before
+// applyGUILaunchDeny, so that knob lands on this profile rather than replacing
+// it. It is idempotent.
+func applyProtectedPaths(opts StartOptions) (StartOptions, error) {
+	if len(opts.ProtectedPaths) == 0 {
+		return opts, nil
+	}
+	for _, path := range opts.ProtectedPaths {
+		if !filepath.IsAbs(path) {
+			return StartOptions{}, fmt.Errorf("agentsessions: StartOptions.ProtectedPaths entry %q must be absolute", path)
+		}
+	}
+	caps := sandbox.ResolveBackendCapabilities("", sandbox.BackendAuto)
+	if !caps.Supported || !slices.Contains(caps.Capabilities, sandbox.CapWriteProtect) {
+		return StartOptions{}, fmt.Errorf("%w: the %s sandbox backend on %s cannot write-protect paths", ErrProtectedPathsUnsupported, caps.Backend, caps.GOOS)
+	}
+	switch {
+	case opts.SandboxPolicy != nil && opts.SandboxPolicy.Mode == sandbox.ConfinementDisabled:
+		// An unconfined policy has nothing to merge into; protection still
+		// needs a sandbox, so the child gets the minimal profile.
+		opts.SandboxPolicy = nil
+		opts.Profile = minimalProtectProfile(opts.ProtectedPaths)
+	case opts.SandboxPolicy != nil:
+		merged, err := opts.SandboxPolicy.WithProtected(opts.ProtectedPaths...)
+		if err != nil {
+			return StartOptions{}, fmt.Errorf("agentsessions: StartOptions.ProtectedPaths: %w", err)
+		}
+		opts.SandboxPolicy = &merged
+	case opts.Profile.ID != "":
+		opts.Profile.FS.Protect = appendMissing(slices.Clone(opts.Profile.FS.Protect), opts.ProtectedPaths)
+	default:
+		opts.Profile = minimalProtectProfile(opts.ProtectedPaths)
+	}
+	return opts, nil
+}
+
+// minimalProtectProfile is a default-allow profile whose only effect is the
+// write protection: on Linux the host filesystem, writable, with the
+// protected paths read-only; on macOS go-sandbox's default-allow seatbelt
+// with write denies.
+func minimalProtectProfile(paths []string) sandbox.Profile {
+	return sandbox.Profile{
+		ID:             minimalProtectProfileID,
+		Net:            true,
+		Subprocess:     true,
+		HostFilesystem: true,
+		FS:             sandbox.FSSpec{Protect: appendMissing(nil, paths)},
+	}
+}
+
+func appendMissing(dst, values []string) []string {
+	for _, value := range values {
+		if !slices.Contains(dst, value) {
+			dst = append(dst, value)
+		}
+	}
+	return dst
 }
 
 // minimalGUIDenyProfileID names the default-allow profile that carries only
@@ -174,6 +249,9 @@ func applyGUILaunchDeny(opts StartOptions) (StartOptions, error) {
 func normalizeProviderStartOptions(opts StartOptions) (StartOptions, error) {
 	if opts.DenyGUILaunch {
 		return StartOptions{}, fmt.Errorf("%w: a provider-native runtime applies no OS sandbox", ErrGUILaunchDenyUnsupported)
+	}
+	if len(opts.ProtectedPaths) > 0 {
+		return StartOptions{}, fmt.Errorf("%w: a provider-native runtime applies no OS sandbox", ErrProtectedPathsUnsupported)
 	}
 	opts, err := normalizeStartOptions(opts)
 	if err != nil {
