@@ -4,6 +4,30 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.20.3 — 2026-10-01
+
+### Fixed
+
+- **A serve-http (OpenCode) turn no longer fails on an error that does not
+  end it** (CW-20261001-0193).
+  - Before: any `session.error` failed the turn in flight, including one with
+    no `sessionID` and a `ContextOverflowError` that OpenCode goes on to
+    compact. The turn reported an error while OpenCode carried on with it.
+  - A context overflow is now held until OpenCode either compacts
+    (`session.compacted`, and the turn carries on to its own end) or goes
+    idle without compacting. In the second case the overflow is the turn's
+    error. This follows `SessionProcessor.halt` in OpenCode 1.18.33: an
+    overflow with auto-compaction on publishes the error without going
+    idle, then compacts; one with compaction off, or that cannot be
+    compacted, publishes the error and goes idle.
+  - An error with no `sessionID` (for example, a plugin that failed to load)
+    is logged as a diagnostic and never fails a turn. No other turn-ending
+    event without a `sessionID` ends a turn either.
+  - Every other `session.error` for this session still ends the turn, once.
+  - Tested by replaying OpenCode's own event shapes: overflow, then
+    compaction, then a reply; overflow, then idle; a sessionless plugin
+    error mid-turn; and an `APIError`.
+
 ## v0.20.2 — 2026-10-01
 
 ### Fixed

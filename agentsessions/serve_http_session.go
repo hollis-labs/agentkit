@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -209,6 +210,10 @@ type serveHTTPSession struct {
 	turnBusy        bool
 	interruptedTurn bool
 	afterAbort      bool
+	// overflow is the turn's ContextOverflowError, held until OpenCode
+	// either compacts and carries on (session.compacted) or goes idle
+	// without compacting, which makes it the turn's failure.
+	overflow []byte
 
 	streamCancel context.CancelFunc
 }
@@ -491,13 +496,7 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 		Type       string          `json:"type"`
 		Directory  string          `json:"directory"`
 		Payload    json.RawMessage `json:"payload"`
-		Properties struct {
-			SessionID string `json:"sessionID"`
-			Delta     string `json:"delta"`
-			Status    struct {
-				Type string `json:"type"`
-			} `json:"status"`
-		} `json:"properties"`
+		Properties sseProperties   `json:"properties"`
 	}
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return
@@ -506,14 +505,8 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 	payload := ev.Payload
 	if len(payload) > 0 {
 		var wrapped struct {
-			Type       string `json:"type"`
-			Properties struct {
-				SessionID string `json:"sessionID"`
-				Delta     string `json:"delta"`
-				Status    struct {
-					Type string `json:"type"`
-				} `json:"status"`
-			} `json:"properties"`
+			Type       string        `json:"type"`
+			Properties sseProperties `json:"properties"`
 		}
 		if err := json.Unmarshal(payload, &wrapped); err == nil && wrapped.Type != "" {
 			ev.Type = wrapped.Type
@@ -522,6 +515,16 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 	}
 
 	if ev.Properties.SessionID != "" && ev.Properties.SessionID != s.sessionID {
+		return
+	}
+	// An event that can end a turn counts only when it names this session.
+	// OpenCode also reports errors that belong to no session (a plugin or
+	// skill that failed to load); those are diagnostics, never a failure of
+	// the turn in flight (CW-20261001-0193).
+	if ev.Properties.SessionID == "" && endsTurn(ev.Type) {
+		if ev.Type == "session.error" || ev.Type == "session.next.step.failed" {
+			log.Printf("agentsessions: serve-http session %s: OpenCode reported an error outside any session, not a turn failure: %s", s.sessionID, data)
+		}
 		return
 	}
 
@@ -544,15 +547,67 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 			s.turnBusy = s.turnInFlight
 			s.turnMu.Unlock()
 		}
+	case "session.compacted":
+		// OpenCode compacted the context after an overflow and carries on
+		// with the turn.
+		s.turnMu.Lock()
+		s.overflow = nil
+		s.turnMu.Unlock()
 	case "session.idle", "session.next.step.ended":
-		if s.endTurn() {
-			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDone})
+		// Read before endTurn, which frees SendInput to start the next
+		// turn and clear it. An idle that ends nothing leaves it held.
+		s.turnMu.Lock()
+		overflow := s.overflow
+		s.turnMu.Unlock()
+		if !s.endTurn() {
+			return
 		}
+		if overflow != nil {
+			// Idle without compacting: the overflow ended the turn
+			// (compaction is off, or the session is too large to
+			// compact).
+			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: string(overflow)})
+			return
+		}
+		tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventDone})
 	case "session.error", "session.next.step.failed":
+		if ev.Properties.Error.Name == "ContextOverflowError" {
+			// OpenCode publishes this before it compacts and carries on;
+			// it is the turn's failure only if no compaction follows.
+			s.turnMu.Lock()
+			if s.turnInFlight {
+				s.overflow = append([]byte(nil), data...)
+			}
+			s.turnMu.Unlock()
+			return
+		}
 		if s.endTurn() {
 			tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventError, Error: string(data)})
 		}
 	}
+}
+
+// sseProperties are the fields of an OpenCode event's properties the session
+// reads.
+type sseProperties struct {
+	SessionID string `json:"sessionID"`
+	Delta     string `json:"delta"`
+	Status    struct {
+		Type string `json:"type"`
+	} `json:"status"`
+	Error struct {
+		Name string `json:"name"`
+	} `json:"error"`
+}
+
+// endsTurn reports whether an OpenCode event type can end or reshape the
+// turn in flight.
+func endsTurn(typ string) bool {
+	switch typ {
+	case "session.idle", "session.next.step.ended", "session.error", "session.next.step.failed", "session.status", "session.compacted":
+		return true
+	}
+	return false
 }
 
 func (s *serveHTTPSession) writeOutput(p []byte) {
@@ -707,6 +762,7 @@ func (s *serveHTTPSession) SendInput(ctx context.Context, data []byte) error {
 	}
 	s.turnInFlight = true
 	s.turnBusy = false
+	s.overflow = nil
 	s.turnMu.Unlock()
 
 	body, err := json.Marshal(map[string]any{
