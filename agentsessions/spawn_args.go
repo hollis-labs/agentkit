@@ -11,7 +11,8 @@ import (
 // this turn, ExtraArgs at the convention's extra-argument slot; the adapter's
 // BuildArgs is not consulted, so the provider argv is never doubled and every
 // turn carries its own prompt and resume id. Without one it is the adapter's
-// BuildArgs with ExtraArgs before its "--" (see withExtraArgs).
+// argv with ExtraArgs at the same slot when the adapter can place them, and
+// before its "--" otherwise (see adapterArgs).
 func spawnArgs(adapter provider.CLIAdapter, opts StartOptions, prompt, systemPrompt, sessionID string) ([]string, error) {
 	if opts.Launch != nil {
 		args, err := opts.Launch.TurnArgv(provider.TurnInput{Prompt: prompt, SystemPrompt: systemPrompt, ResumeID: sessionID}, opts.ExtraArgs...)
@@ -20,5 +21,5 @@ func spawnArgs(adapter provider.CLIAdapter, opts StartOptions, prompt, systemPro
 		}
 		return args, nil
 	}
-	return withExtraArgs(adapter.BuildArgs(prompt, systemPrompt, sessionID), opts.ExtraArgs), nil
+	return adapterArgs(adapter, prompt, systemPrompt, sessionID, opts.ExtraArgs), nil
 }

@@ -41,6 +41,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     supervisor, plus a stand-in CLI that stops reading stdin so the write
     fails. The adapter without a classifier, a run with no resume id, and a
     clean exit stay silent.
+## v0.21.0 — 2026-10-01
+
+`StartOptions.ExtraArgs` go where the adapter's convention takes them
+(CW-20261001-0197). Takes go-providers v0.42.0.
+
+### Changed
+
+- **The adapter path (no `Launch`) places `StartOptions.ExtraArgs` through
+  `provider.ExtraArgsBuilder`,** at the launch convention's extra-argument
+  slot, where a `Launch` template already put them. Every go-providers
+  adapter implements it from v0.42.0.
+  - Before, they were spliced into `BuildArgs`' output just before "--".
+    For a codex exec resume turn that put them after `resume <id>`, where
+    codex refuses exec-only flags (`-s`, `--cd`, `--add-dir`), so such an
+    extra broke turn 2. v0.20.4's documented "must be resume-safe"
+    constraint is retired.
+  - Other effects: the slot can sit earlier than "--". For example, Claude
+    print puts extras before `--add-dir <project>`. go-providers'
+    convention tests check that the slot never makes an extra swallow the
+    prompt or join a variadic flag's values.
+  - **Unchanged:**
+    - an adapter without the interface still gets the splice;
+    - so does a caller-supplied `AdapterRuntimeConfig.BuildArgs`;
+    - extras that carry their own "--" are still appended.
+  - **Tested:**
+    - `TestAdapterArgsPrefersTheConventionSlot` covers the builder, the
+      fallback and the "--" tail.
+    - `TestSubprocessSession_ExtraArgsWithTheirOwnDashDashAreAppendedAsBefore`
+      runs a session with an extra that carries its own "--" and checks the
+      argv is `BuildArgs`' output followed by the extras unchanged.
+    - `TestAutoPlantedCodexExecResumesWithCdBeforeResume` now includes an
+      exec-only `-s read-only` that lands in front of `resume`.
+    - With the builder disabled the last two fail; with the "--" guard
+      removed the first two do.
 
 ## v0.20.6 — 2026-10-01
 
