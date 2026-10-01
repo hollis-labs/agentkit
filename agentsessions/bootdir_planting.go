@@ -94,6 +94,7 @@ func preparePlant(opts StartOptions, adapter provider.CLIAdapter, runtimeID stri
 	// and surface the cloned adapter back to the caller. Non-Claude or
 	// non-bare adapters need no mutation; the original adapter is returned.
 	sessionAdapter, projectDirArg = applyBareInjection(adapter, dir, projectDir, projectDirArg)
+	sessionAdapter, projectDirArg = applyCodexProjectDir(sessionAdapter, projectDir, projectDirArg)
 
 	planted.Workdir = spec.SpawnWorkdir(dir, projectDir)
 	if len(envAmend) > 0 {
@@ -209,6 +210,28 @@ func applyBareInjection(adapter provider.CLIAdapter, bootDir, projectDir string,
 	clone.ProjectDir = inj.ProjectDir
 	// Bare BuildArgs already emits --add-dir for clone.ProjectDir; emitting
 	// it again via ExtraArgs would double-add the flag.
+	return &clone, nil
+}
+
+// applyCodexProjectDir gives a codex exec adapter the project through its own
+// ProjectDir field on a per-session clone, instead of splicing BootDirSpec's
+// `--cd <project>` in through ExtraArgs. go-providers v0.41.0 resumes a codex
+// exec thread with `exec … --cd <project> resume <id> -- <prompt>`, and codex
+// takes --cd only in front of the resume subcommand: spliced before "--" it
+// landed after `resume <id>`, where codex-cli 0.159.2 refuses it ("unexpected
+// argument '--cd' found"), so every auto-planted codex exec session failed
+// its second turn. The field puts --cd at the launch convention's slot, before
+// `resume`. A first turn's argv is unchanged.
+//
+// App-server adapters, other adapters, and a spec with no project-dir
+// argument are returned unchanged along with projectDirArg.
+func applyCodexProjectDir(adapter provider.CLIAdapter, projectDir string, projectDirArg []string) (provider.CLIAdapter, []string) {
+	codex, ok := adapter.(*provider.CodexAdapter)
+	if !ok || codex.Mode == "app-server" || len(projectDirArg) == 0 {
+		return adapter, projectDirArg
+	}
+	clone := *codex
+	clone.ProjectDir = projectDir
 	return &clone, nil
 }
 

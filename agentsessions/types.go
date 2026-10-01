@@ -621,7 +621,9 @@ type StartOptions struct {
 	//     BootDirSpec.EnvAmendments and appends to Env
 	//   - substitutes the same tokens in BootDirSpec.ProjectDirArg and
 	//     appends to ExtraArgs (which the runtime splices into argv after
-	//     adapter.BuildArgs)
+	//     adapter.BuildArgs); a codex exec adapter instead gets the project
+	//     in a per-session clone's ProjectDir, so its --cd stays in front of
+	//     a resume turn's `resume <id>` (v0.20.4)
 	//   - sets Workdir to BootDirSpec.SpawnWorkdir(bootDir, originalWorkdir)
 	//   - for Claude bare-mode adapters, applies BareInjectionPaths and
 	//     mutates a per-session clone of the adapter so the planted paths
@@ -670,6 +672,14 @@ type StartOptions struct {
 	// per-session argv without wrapping the adapter; in that case the
 	// runtime does NOT do template substitution — pre-resolve any
 	// placeholders before passing the slice.
+	//
+	// On a codex exec session without Launch, turn 2 onward resumes the
+	// thread (`exec … resume <id> -- <prompt>`, go-providers v0.41.0), and
+	// ExtraArgs land after `resume <id>`. They must be ones codex accepts
+	// there: -c, -m, --dangerously-bypass-approvals-and-sandbox. Exec-only
+	// flags (-s, --cd, --add-dir) belong in the CodexAdapter's own
+	// ExtraArgs, or in a Launch template, which place them in front of the
+	// subcommand (CW-20261001-0197 tracks placing these there too).
 	//
 	// Added in v0.9.0.
 	ExtraArgs []string
