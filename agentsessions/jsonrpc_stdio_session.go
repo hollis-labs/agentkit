@@ -198,9 +198,14 @@ type jsonRpcStdioSession struct {
 	// rpcTurn is the open turn's handle, as the adapter's
 	// provider.RPCTurnInterrupter reads it from the turn notifications;
 	// nil when no turn is open.
-	rpcTurn    atomic.Pointer[json.RawMessage]
-	startedPID atomic.Int32
-	lastPID    atomic.Int32
+	rpcTurn atomic.Pointer[json.RawMessage]
+	// codexSeen and codexSeenOrder are the ids of the Codex items already
+	// reported, so a repeated item/completed is reported once (see
+	// reportCodexNotification). The reader goroutine alone touches them.
+	codexSeen      map[string]struct{}
+	codexSeenOrder []string
+	startedPID     atomic.Int32
+	lastPID        atomic.Int32
 	// spawnedAt is the most-recent successful cmd.Start time as unix
 	// nanoseconds. Set inside spawnAttempt after cmd.Start; read by the
 	// waiter paths to compute elapsed-since-spawn for the abnormal-wait
@@ -432,6 +437,7 @@ func (s *jsonRpcStdioSession) runReaderLoop(stdout io.Reader) {
 		case frame.Method != "":
 			// Notification — no response expected.
 			s.followTurn(frame.Method, frame.Params)
+			s.reportCodexNotification(frame.Method, frame.Params)
 			if s.opts.JsonRpcNotificationHook != nil {
 				s.opts.JsonRpcNotificationHook(frame.Method, frame.Params)
 			}

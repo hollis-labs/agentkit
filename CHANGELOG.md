@@ -4,6 +4,77 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.23.0 — 2026-10-02
+
+A Codex app-server turn now reports what it said, what it ran and when it ended
+(CW-20261002-0061, ADR 0049).
+
+### Added
+
+- **The jsonrpc-stdio session reports a Codex turn on `EventFanout` and
+  `TypedEventCallback`.** Before, neither surface saw anything of an
+  app-server turn, because go-providers' Codex adapter leaves app-server's
+  JSON-RPC to the runtime and the runtime only forwarded notifications to
+  `JsonRpcNotificationHook`. A host (go-agent-wrapper, Tether) reading those
+  surfaces therefore saw no final message and no end of turn.
+  - `item/completed` for an `agentMessage` is one delta: block id is the item
+    id, phase is `final` for Codex's `final_answer`, `narration` for
+    `commentary`, and empty when Codex names none. The streamed
+    `item/agentMessage/delta` notifications are not reported, so a message is
+    never delivered twice.
+  - `item/completed` for a `commandExecution` or `fileChange` is a tool use
+    (`Name` is the item type; `Args` the command or the changes), with a tool
+    result on the typed surface (`IsError` for a failed or declined item, the
+    output cut at 256 bytes). Codex reports nothing when a turn starts, so a turn
+    that only runs tools would otherwise be a lone done: a consumer cannot tell
+    that from a repeat of the previous turn's.
+  - `turn/completed` is a done carrying the stop reason: `end_turn`, or
+    `cancelled` for status `interrupted`. On the legacy stream the stop reason
+    travels on a usage event ahead of the done, as it does for the other runtimes.
+    Status `failed` is an error carrying the turn's own message.
+  - An item reported once is not reported again if Codex repeats its
+    `item/completed` (the last 256 item ids are remembered), so a consumer does not
+    concatenate a message with itself.
+  - User messages and reasoning yield nothing. Only the Codex adapter gets this;
+    another JSON-RPC adapter is untouched. `JsonRpcNotificationHook` still
+    receives every notification, unchanged.
+
+### Documented
+
+- **`EventFanout` is lossy, and a reducer host should use `TypedEventCallback`.**
+  A send to a full channel is dropped without notice, whichever event it is: with
+  a capacity-1 fanout and a stalled consumer, a turn's final message, usage and
+  done were all lost. The typed callback never drops. This was always true; it is
+  now written on `StartOptions.EventFanout` and in the package doc, because the
+  turn reducer in go-agent-wrapper reads both surfaces.
+- **The typed callback runs on the JSON-RPC session's reader goroutine**, so a
+  callback that calls the session's `Call` (from a `Done` handler, say)
+  deadlocks the session. Hand the work to another goroutine.
+
+### Tests
+
+- A captured Codex app-server transcript (go-providers' `codex/app_server_turn`,
+  two turns) through a real session asserts both surfaces whole, event by event.
+  The `app_server_interrupt` capture ends its interrupted turn `cancelled` on both
+  surfaces, with the fanout read.
+- A three-turn transcript (an answered turn, an interrupted turn that said
+  nothing, a turn that ran a command and wrote nothing) reports every turn on both
+  surfaces. This is the sequence a turn reducer must not lose a turn in.
+- A table test asserts the stream surface and the typed surface separately for
+  phases, empty and non-message items, tool items, the streamed deltas, every turn
+  status and the three shapes of a failed turn's error; the repeated item and the
+  non-Codex guard have tests of their own. Each of these fails if a stream delta's
+  phase, the stream error's text, the stream tool use, the usage stop reason, the
+  item dedupe or the adapter guard is removed.
+
+### Not covered
+
+- A Codex turn that is blocked on an approval or a `requestUserInput` request has
+  not ended, so it reports nothing until it does.
+- Token usage (`thread/tokenUsage/updated`) is still the host's to read; the
+  usage event carries only the stop reason.
+- Codex `mcpToolCall` and `webSearch` items are not reported as tool uses.
+
 ## v0.22.0 — 2026-10-02
 
 A launch plan can ask to be kept to the MCP servers it plants (CW-20261001-0225).

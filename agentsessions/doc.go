@@ -13,6 +13,16 @@
 //     NDJSON over stdin/stdout (Claude `claude -p --input-format stream-json`)
 //   - long-lived JSON-RPC stdio (Caps.JsonRpcStdio; jsonrpc-stdio) —
 //     JSON-RPC 2.0 over stdin/stdout (Codex `app-server`)
+//     (Codex `app-server`). The session reports a Codex turn's agent messages,
+//     commands, file changes and end on EventFanout and TypedEventCallback like
+//     every other runtime: item/completed for an agentMessage is a delta (phase
+//     final for the final answer, narration for commentary, block id the item
+//     id), for a commandExecution or fileChange a tool use (and, on the typed
+//     surface, a tool result), and turn/completed is a done (stop reason
+//     end_turn, or cancelled when interrupted) or, for a failed turn, an error.
+//     A repeated item id is reported once. Prefer TypedEventCallback: EventFanout
+//     drops events when its channel is full (see StartOptions.EventFanout), and a
+//     dropped final message or done corrupts a consumer's view of the turn.
 //   - long-lived HTTP server (Caps.ServeHTTP; http-sse) — child-owned HTTP
 //     API with server-sent events (opencode `serve`)
 //   - HTTP-streamed (llmcontracts.Provider directly, via NewFromProvider)
