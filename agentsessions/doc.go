@@ -45,7 +45,10 @@
 //     process, so the next SendInput runs on the same process. The
 //     streaming-stdio (Claude control_request), JSON-RPC (Codex
 //     turn/interrupt) and serve-http (OpenCode abort) sessions implement it;
-//     an adapter with no interrupt returns ErrInterruptUnsupported.
+//     an adapter with no interrupt returns ErrInterruptUnsupported. Streaming
+//     cancellation bounds input-lock acquisition, stdin writing and the ACK
+//     wait. The pipe stays open; a canceled waiter cannot later write an
+//     interrupt, and its write deadline is cleared before the next input.
 //   - SessionIDer, CheckpointHinter, PIDReporter, SandboxOutcomeReporter.
 //
 // A Manager registers Sessions, persists state transitions through
