@@ -51,6 +51,8 @@
 // A Manager registers Sessions, persists state transitions through
 // caller-supplied sinks, watches for terminal exits, and broadcasts
 // session output to attach subscribers via an in-memory ring buffer.
+// Manager.InterruptTurn forwards cancellation; callers wait for the terminal
+// event before submitting a replacement turn.
 //
 // # Composition
 //

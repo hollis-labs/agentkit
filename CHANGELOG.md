@@ -4,6 +4,28 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.25.0 — 2026-10-02
+
+Hosts can interrupt a registered session through the Manager
+(CW-20261002-0067, ADR 0049).
+
+### Added
+
+- **`Manager.InterruptTurn(ctx, sessionID)` forwards the session's existing
+  `TurnInterrupter`.** A missing session returns `ErrSessionNotRunning`; a
+  session or adapter without cancellation returns `ErrInterruptUnsupported`.
+  Provider refusals and caller cancellation propagate unchanged. No registry
+  or input locks are held across the call, so interruption can unblock a
+  `SendInput` waiting for its active turn. The session stays registered.
+  - The call returns the cancellation acknowledgement. The caller must wait
+    for the turn's terminal event before submitting a replacement turn.
+
+### Tests
+
+- Missing and unsupported sessions, provider and context error propagation,
+  caller context preservation, and interruption concurrent with a blocked
+  `SendInput`, without stopping the session.
+
 ## v0.24.0 — 2026-10-02
 
 A Codex app-server turn reports what it was refused and what it asked
