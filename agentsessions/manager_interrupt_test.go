@@ -3,13 +3,17 @@ package agentsessions
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestManagerInterruptTurnUnsupported(t *testing.T) {
 	m := NewManager(nil)
-	defer func() { _ = m.Shutdown(context.Background()) }()
+	defer func() {
+		_ = m.Stop(context.Background(), "s")
+		_ = m.Shutdown(context.Background())
+	}()
 	if err := m.InterruptTurn(context.Background(), "missing"); !errors.Is(err, ErrSessionNotRunning) {
 		t.Fatalf("missing session: %v", err)
 	}
@@ -54,7 +58,10 @@ func TestManagerInterruptTurnPropagatesErrors(t *testing.T) {
 	for _, want := range []error{ErrInterruptUnsupported, refused, context.Canceled} {
 		t.Run(want.Error(), func(t *testing.T) {
 			m := NewManager(nil)
-			defer func() { _ = m.Shutdown(context.Background()) }()
+			defer func() {
+				_ = m.Stop(context.Background(), "s")
+				_ = m.Shutdown(context.Background())
+			}()
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if want == context.Canceled {
@@ -81,8 +88,14 @@ func TestManagerInterruptTurnPropagatesErrors(t *testing.T) {
 
 func TestManagerInterruptTurnDoesNotWaitForSendInput(t *testing.T) {
 	m := NewManager(nil)
-	defer func() { _ = m.Shutdown(context.Background()) }()
+	defer func() {
+		_ = m.Stop(context.Background(), "s")
+		_ = m.Shutdown(context.Background())
+	}()
 	started, released := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(released) }) }
+	defer release()
 	rt := managerInterruptRuntime{fakeRuntime: newFakeRuntime("interrupt", "test"), input: func(context.Context, []byte) error {
 		close(started)
 		<-released
@@ -90,7 +103,7 @@ func TestManagerInterruptTurnDoesNotWaitForSendInput(t *testing.T) {
 	}, interrupt: func(context.Context) error {
 		// An interrupt must be able to unblock a provider whose SendInput
 		// waits for its turn. Taking inputMu here would deadlock both.
-		close(released)
+		release()
 		return nil
 	}}
 	if err := m.Start(context.Background(), StartRequest{ID: "s", Runtime: rt}); err != nil {
@@ -105,8 +118,15 @@ func TestManagerInterruptTurnDoesNotWaitForSendInput(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	if err := m.InterruptTurn(ctx, "s"); err != nil {
-		t.Fatal(err)
+	interruptDone := make(chan error, 1)
+	go func() { interruptDone <- m.InterruptTurn(ctx, "s") }()
+	select {
+	case err := <-interruptDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("interrupt blocked behind SendInput")
 	}
 	select {
 	case err := <-inputDone:
