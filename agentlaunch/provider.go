@@ -67,7 +67,10 @@ type ProviderSpec struct {
 	// it uncompiled or through an adapter that cannot honor the request. The
 	// user's servers are left out on purpose: a host that wants one passes it
 	// as a planted server. It does not narrow which tools of the planted
-	// servers may run; that stays the host's allow-list. Default false: the
-	// launch is exactly what it was. Optional.
+	// servers may run; that stays the host's allow-list. A plan-supplied
+	// CODEX_HOME (Provider.Env or Injection.Env) is refused when exclusivity
+	// uses the config root. A flag-based launch with planted servers must pass
+	// its MCP config before the prompt, or preparation fails. Default false:
+	// the launch is exactly what it was. Optional.
 	MCPExclusive bool `yaml:"mcp_exclusive,omitempty" json:"mcp_exclusive,omitempty"`
 }

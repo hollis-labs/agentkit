@@ -7,7 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased
 
 A launch plan can ask to be kept to the MCP servers it plants (CW-20261001-0225).
-Takes go-providers v0.43.0. **Partly done; see "Not done yet".**
+Takes go-providers v0.43.0.
 
 ### Added
 
@@ -51,13 +51,18 @@ Takes go-providers v0.43.0. **Partly done; see "Not done yet".**
     launch's value has provider precedence, so a plan's own `Provider.Env` cannot
     move it; this guards anything that merges after it.
 
+- When flag-based exclusivity is requested with planted servers (including
+  loopback and self-MCP entries), the final argv must carry a nonempty
+  `--mcp-config` value before the prompt. Otherwise preparation is refused
+  instead of silently loading no servers. Empty planted sets remain valid.
+
+- A plan-supplied `CODEX_HOME` in `Provider.Env` or `Injection.Env` is refused
+  when exclusivity uses the projected config root. Provider precedence and
+  the final environment guard remain underneath; unset exclusivity behaves
+  as before.
+
 ### Not done yet
 
-- **MCP servers planted but no `--mcp-config` in the argv** is not an error yet.
-  With exclusivity on, Claude then silently gets no MCP servers.
-- **A plan that names its own `CODEX_HOME` while asking for exclusivity** is
-  silently superseded by the launch's value, as it was before. Whether that should
-  be an explicit error is an open decision.
 - No catalog field carries it yet; a host sets `ProviderSpec.MCPExclusive`.
 
 ### Tests
@@ -65,7 +70,7 @@ Takes go-providers v0.43.0. **Partly done; see "Not done yet".**
 - Every supported provider and mode: not asked leaves the argv and environment as
   they were; asked adds exactly the flag (Claude), nothing (Codex) or is refused,
   naming provider and mode.
-- A plan's own `CODEX_HOME` does not move the root; a custom adapter that ignores
+- A plan's own `CODEX_HOME` is refused with config-root exclusivity; a custom adapter that ignores
   the option is refused; a `BootDirSpec`-only provider is refused; the environment
   guard refuses a root that did not survive the merge, and the preparer runs it
   exactly when exclusivity was asked for.
@@ -76,7 +81,9 @@ Takes go-providers v0.43.0. **Partly done; see "Not done yet".**
   projection not judged, a `BootDirSpec`-only provider not refused, the environment
   guard dropped or run when not asked, `Compile`'s check removed, reverted to
   refusing only an unmeasured mode, or no longer naming the mode, and the field
-  losing `omitempty`.
+  losing `omitempty`. The final MCP argv guard and contradictory CODEX_HOME
+  refusal each have a failing mutation check.
+
 ## v0.21.2 — 2026-10-01
 
 ### Fixed

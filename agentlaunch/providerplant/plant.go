@@ -149,6 +149,11 @@ func buildPreparedExecution(ctx context.Context, prepared *agentlaunch.PreparedL
 	if err != nil {
 		return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
 	}
+	if plan.Provider.MCPExclusive {
+		if err := requireExclusiveMCPArgv(projection, plantCtx, argv); err != nil {
+			return nil, fmt.Errorf("agentlaunch/providerplant: %w", err)
+		}
+	}
 	env := mergePreparedEnv(prepared.Env, binding.Env)
 	for name, value := range posture.Env {
 		env[name] = agentlaunch.EnvVar{Value: value, Source: "posture", Precedence: 20}
@@ -207,6 +212,14 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 			if err := provider.CheckMCPExclusive(proj); err != nil {
 				return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: provider projection: %w", err)
 			}
+			if d, ok := registry.Lookup(string(proj.Provider)); ok && d.MCPExclusivity(proj.Mode) == registry.MCPExclusivityProjectedLayout {
+				_, providerHome := plan.Provider.Env["CODEX_HOME"]
+				_, injectionHome := plan.Injection.Env["CODEX_HOME"]
+				if providerHome || injectionHome {
+					return artifact.Tree{}, agentlaunch.ProviderProjection{}, provider.LaunchBinding{}, nil, fmt.Errorf("agentlaunch/providerplant: %w: %s/%s MCP exclusivity conflicts with plan-supplied CODEX_HOME",
+						agentlaunch.ErrMCPExclusiveUnsupported, proj.Provider, proj.Mode)
+				}
+			}
 		}
 		launch := &agentlaunch.TurnTemplate{
 			Convention: proj.Launch,
@@ -246,6 +259,30 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 // that the preparer runs it exactly when exclusivity was asked for. Nothing else
 // assigns it.
 var checkExclusiveEnv = requireExclusiveEnv
+
+// A flag-based exclusive launch with planted servers must actually pass its
+// MCP config, otherwise the strict mode silently loads no servers. Check the
+// final argv, including host extras, without adding provider-owned flags.
+func requireExclusiveMCPArgv(projection agentlaunch.ProviderProjection, ctx provider.PlantContext, argv []string) error {
+	d, ok := registry.Lookup(projection.Provider)
+	if !ok || d.MCPExclusivity(projection.Runtime) != registry.MCPExclusivityFlag ||
+		(len(ctx.MCPServers) == 0 && ctx.MCPLoopbackURL == "" && ctx.MuxCommand == "") {
+		return nil
+	}
+	for i, arg := range argv {
+		if arg == "--" {
+			break
+		}
+		if value, found := strings.CutPrefix(arg, "--mcp-config="); found && value != "" {
+			return nil
+		}
+		if arg == "--mcp-config" && i+1 < len(argv) && argv[i+1] != "" && !strings.HasPrefix(argv[i+1], "-") {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s/%s has planted MCP servers but its launch argv has no --mcp-config value before the prompt",
+		agentlaunch.ErrMCPExclusiveUnsupported, projection.Provider, projection.Runtime)
+}
 
 func requireExclusiveEnv(projection agentlaunch.ProviderProjection, set []provider.EnvDelta, env map[string]agentlaunch.EnvVar) error {
 	d, ok := registry.Lookup(projection.Provider)

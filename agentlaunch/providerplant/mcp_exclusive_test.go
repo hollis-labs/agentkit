@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -163,11 +164,11 @@ func mapPairs(m map[string]string) []string {
 }
 
 // A plan's own CODEX_HOME cannot move the config root a Codex launch is kept
-// exclusive by: the launch's variable wins over the caller's.
+// exclusive by: the launch's variable wins over the inherited environment.
 func TestPrepareExecution_MCPExclusiveCodexHomeIsThePlantedDir(t *testing.T) {
 	for _, mode := range []runtimes.Mode{runtimes.ModeSubprocessPerTurn, runtimes.ModeJSONRPCStdio} {
 		t.Run(string(mode), func(t *testing.T) {
-			exec, err := prepareMCP(t, "codex", mode, true, map[string]string{"CODEX_HOME": "/somewhere/else"})
+			exec, err := prepareMCP(t, "codex", mode, true, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -279,5 +280,131 @@ func TestPrepareExecution_MCPExclusiveRunsTheEnvironmentGuard(t *testing.T) {
 	}
 	if _, err := prepareMCP(t, "codex", runtimes.ModeSubprocessPerTurn, false, nil); err != nil {
 		t.Errorf("not asked: the guard must not run, got %v", err)
+	}
+}
+
+// A custom adapter can preserve strict mode but omit the MCP config argument.
+// The request must then fail rather than silently dropping planted servers.
+type dropsMCPConfig struct{ *provider.ClaudeAdapter }
+
+func (a dropsMCPConfig) ProviderProjection(ctx provider.PlantContext, opts provider.ProjectionOptions) (provider.ProviderProjection, error) {
+	proj, err := a.ClaudeAdapter.ProviderProjection(ctx, opts)
+	if err != nil {
+		return proj, err
+	}
+	for i, arg := range proj.Launch.Argv {
+		if arg.Value == "--mcp-config" {
+			proj.Launch.Argv = slices.Delete(proj.Launch.Argv, i, i+1)
+			break
+		}
+	}
+	return proj, nil
+}
+
+func TestPrepareExecution_MCPExclusiveRequiresPlantedConfigInArgv(t *testing.T) {
+	for _, mode := range []runtimes.Mode{runtimes.ModePTY, runtimes.ModeStreamingStdio, runtimes.ModeSubprocessPerTurn} {
+		for _, source := range []string{"servers", "loopback", "self", "none"} {
+			for _, exclusive := range []bool{false, true} {
+				t.Run(string(mode)+"/"+source+"/exclusive="+strconv.FormatBool(exclusive), func(t *testing.T) {
+					isolateHome(t)
+					compiled := compiledFor(t, "claude", mode)
+					compiled.Plan.Provider.MCPExclusive = exclusive
+					prepared, err := launcher.Prepare(context.Background(), compiled)
+					if err != nil {
+						t.Fatal(err)
+					}
+					switch source {
+					case "servers":
+						prepared.PlantContext.MCPServers = []agentlaunch.MCPServerSpec{{Name: "fixture", Command: "/bin/echo"}}
+					case "loopback":
+						prepared.PlantContext.MCPLoopbackURL = "http://127.0.0.1:7777/mcp"
+					case "self":
+						prepared.PlantContext.SelfMCPCommand = "/bin/echo"
+					}
+					adapter, err := provider.NewAdapter("claude", mode)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = PrepareExecution(context.Background(), prepared, WithAdapter(dropsMCPConfig{adapter.(*provider.ClaudeAdapter)}))
+					if exclusive && source != "none" {
+						if !errors.Is(err, agentlaunch.ErrMCPExclusiveUnsupported) {
+							t.Fatalf("missing MCP config: %v", err)
+						}
+						if !strings.Contains(err.Error(), "claude/"+string(mode)) {
+							t.Fatalf("error does not name launch: %v", err)
+						}
+					} else if err != nil {
+						t.Fatalf("unrequested or empty MCP set: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRequireExclusiveMCPArgvChecksConfigBeforePrompt(t *testing.T) {
+	proj := agentlaunch.ProviderProjection{Provider: "claude", Runtime: runtimes.ModeSubprocessPerTurn}
+	ctx := provider.PlantContext{MCPServers: []provider.MCPServerSpec{{Name: "fixture", Command: "/bin/echo"}}}
+	for _, tc := range []struct {
+		name string
+		argv []string
+		ok   bool
+	}{
+		{"config pair", []string{"claude", "--mcp-config", "/boot/.mcp.json", "--", "hi"}, true},
+		{"config equals", []string{"claude", "--mcp-config=/boot/.mcp.json"}, true},
+		{"missing", []string{"claude", "--strict-mcp-config"}, false},
+		{"missing value", []string{"claude", "--mcp-config", "--strict-mcp-config"}, false},
+		{"empty value", []string{"claude", "--mcp-config", ""}, false},
+		{"empty equals", []string{"claude", "--mcp-config="}, false},
+		{"prompt text", []string{"claude", "--", "--mcp-config", "/boot/.mcp.json"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := requireExclusiveMCPArgv(proj, ctx, tc.argv)
+			if tc.ok != (err == nil) {
+				t.Fatalf("argv=%q: %v", tc.argv, err)
+			}
+		})
+	}
+}
+
+func TestPrepareExecution_MCPExclusiveRejectsPlanCodexHome(t *testing.T) {
+	for _, mode := range []runtimes.Mode{runtimes.ModeSubprocessPerTurn, runtimes.ModeJSONRPCStdio} {
+		for _, source := range []string{"provider", "injection"} {
+			for _, value := range []string{"/elsewhere", ""} {
+				for _, exclusive := range []bool{false, true} {
+					t.Run(string(mode)+"/"+source+"/"+value+"/exclusive="+strconv.FormatBool(exclusive), func(t *testing.T) {
+						isolateHome(t)
+						compiled := compiledFor(t, "codex", mode)
+						compiled.Plan.Provider.MCPExclusive = exclusive
+						if source == "provider" {
+							compiled.Plan.Provider.Env = map[string]string{"CODEX_HOME": value}
+						} else {
+							compiled.Plan.Injection.Env = map[string]string{"CODEX_HOME": value}
+						}
+						prepared, err := launcher.Prepare(context.Background(), compiled)
+						if err != nil {
+							t.Fatal(err)
+						}
+						execution, err := PrepareExecution(context.Background(), prepared)
+						if exclusive {
+							if !errors.Is(err, agentlaunch.ErrMCPExclusiveUnsupported) || !strings.Contains(err.Error(), "CODEX_HOME") {
+								t.Fatalf("contradictory plan: %v", err)
+							}
+						} else {
+							if err != nil {
+								t.Fatalf("unset exclusivity changed behavior: %v", err)
+							}
+							if got := execution.Bindings.Env["CODEX_HOME"]; got.Value != execution.Roots.BootRoot || got.Source != "provider" {
+								t.Fatalf("provider precedence changed: %+v", got)
+							}
+						}
+					})
+				}
+			}
+		}
+	}
+	// The new refusal applies only to projected-layout exclusivity, not Claude.
+	if _, err := prepareMCP(t, "claude", runtimes.ModePTY, true, map[string]string{"CODEX_HOME": "/elsewhere"}); err != nil {
+		t.Fatalf("flag-based exclusivity refused unrelated environment: %v", err)
 	}
 }
