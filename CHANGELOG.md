@@ -4,6 +4,29 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.26.0 — 2026-10-02
+
+A Manager interruption cannot silently acknowledge the gap between an accepted
+RPC submission and its start notification (CW-20261002-0067, ADR 0049).
+
+### Added
+
+- **Optional `TurnInterruptReadiness` and `ErrTurnNotStarted`.** The JSON-RPC
+  stdio session reports whether its adapter can interrupt and whether the
+  runtime turn handle is tracked. `Manager.InterruptTurn` checks this query
+  before cancellation, returns `ErrTurnNotStarted` when the handle is absent,
+  and preserves an unsupported-adapter or query error. Hosts can retry under
+  a bounded deadline; no registry/input lock is held during the query or call.
+  The direct session's no-turn `InterruptTurn` contract still returns nil.
+
+### Tests
+
+- Manager readiness/error propagation without calling cancellation prematurely,
+  direct session no-turn compatibility, and a scripted Codex response followed
+  by a withheld start notification, released by an explicit test frame. The
+  original capture orders response before notification but cannot hold that
+  interval open; the script preserves its protocol shapes without a model CLI.
+
 ## v0.25.0 — 2026-10-02
 
 Hosts can interrupt a registered session through the Manager
