@@ -160,6 +160,15 @@ func Compile(ctx context.Context, plan agentlaunch.LaunchPlan, opts ...CompileOp
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPermission, err)
 	}
 
+	// Fail-fast: a launch that asked to be kept to its own MCP servers on a
+	// runtime and mode where go-providers measured no mechanism would load the
+	// user's servers regardless. Refuse it rather than compile a launch that
+	// is not what was asked for. The preparer checks the projection itself.
+	if plan.Provider.MCPExclusive && !desc.Registry.MCPExclusivity(plan.Runtime).Exclusive() {
+		return nil, fmt.Errorf("%w: %s/%s has no measured way to keep a launch to its own MCP servers: drop Provider.MCPExclusive, or launch a runtime and mode that has one",
+			agentlaunch.ErrMCPExclusiveUnsupported, desc.ProviderID, plan.Runtime)
+	}
+
 	resolved, err := agentlaunch.ResolvePlanPaths(plan)
 	if err != nil {
 		return nil, fmt.Errorf("agentlaunch/compile: %w", err)

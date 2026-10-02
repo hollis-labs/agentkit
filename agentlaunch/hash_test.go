@@ -1,6 +1,7 @@
 package agentlaunch
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -93,6 +94,7 @@ func TestHashLaunchPlanDifferentPlanDifferentHash(t *testing.T) {
 		{"provider.env changed value", func(p *LaunchPlan) {
 			p.Provider.Env["ALPHA"] = "different"
 		}},
+		{"provider.mcp_exclusive", func(p *LaunchPlan) { p.Provider.MCPExclusive = true }},
 	}
 
 	for _, mut := range mutations {
@@ -135,5 +137,28 @@ func TestHashLaunchPlanMapOrderIndependent(t *testing.T) {
 	}
 	if h1 != h2 {
 		t.Fatalf("map-order-permuted plans produced different hashes: %q vs %q", h1, h2)
+	}
+}
+
+// A plan that does not ask for MCP exclusivity serializes exactly as it did
+// before the field existed, so its hash (and every hash recorded for such a
+// plan) is unchanged (CW-20261001-0225).
+func TestHashLaunchPlanIgnoresAnUnsetMCPExclusive(t *testing.T) {
+	plan := validPlanForHash()
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "mcp_exclusive") {
+		t.Errorf("an unset MCPExclusive appears in the plan's JSON: %s", raw)
+	}
+	asked := plan
+	asked.Provider.MCPExclusive = true
+	raw, err = json.Marshal(asked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"mcp_exclusive":true`) {
+		t.Errorf("a set MCPExclusive is missing from the plan's JSON: %s", raw)
 	}
 }

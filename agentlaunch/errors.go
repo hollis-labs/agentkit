@@ -1,6 +1,10 @@
 package agentlaunch
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/hollis-labs/go-providers/provider"
+)
 
 // Sentinel errors returned by the Validate methods on LaunchPlan,
 // CompiledLaunch, and PreparedLaunch. All sentinels are
@@ -374,4 +378,12 @@ var (
 	// from. The interactive front-end reports the same condition via
 	// RenderResult.Missing instead of returning this error.
 	ErrAssemblyMissingRequiredInput = errors.New("agentlaunch: assembly render missing required input")
+
+	// ErrMCPExclusiveUnsupported is returned when ProviderSpec.MCPExclusive is
+	// set and the launch cannot be kept to its own MCP servers: Compile for a
+	// runtime and mode go-providers measured no mechanism for, the preparer for
+	// a launch whose adapter or environment would not carry one. It is
+	// go-providers' own error, so errors.Is matches it at every layer. A launch
+	// that asked for exclusivity is refused, never run without it.
+	ErrMCPExclusiveUnsupported = provider.ErrMCPExclusiveUnsupported
 )

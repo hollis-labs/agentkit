@@ -4,6 +4,86 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.22.0 — 2026-10-02
+
+A launch plan can ask to be kept to the MCP servers it plants (CW-20261001-0225).
+Takes go-providers v0.43.0.
+
+### Added
+
+- **`ProviderSpec.MCPExclusive`** (`mcp_exclusive` in yaml and json). Set, the
+  launch loads only the MCP servers the launch plants, not also the user's own
+  (`~/.claude.json`, `~/.codex`), which a runtime otherwise loads next to them.
+  go-providers owns the mechanism per runtime and mode; agentkit passes the
+  request through and does not spell any flag. Default false, and then nothing
+  changes: the field is `omitempty`, so the plan hash of a plan that does not
+  set it is the same as before.
+  - **What was measured** (claude 2.1.286, codex-cli 0.159.3, opencode 1.18.33, in
+    go-providers' probe): Claude's `--strict-mcp-config` and Codex's planted
+    `CODEX_HOME` leave out the user-level servers. OpenCode has no MCP-only
+    switch, and Antigravity could not be measured. Claude account connectors,
+    managed and plugin servers were not measured, so they are not claimed.
+  - **Interplay with `MCPAllow`** (CW-20261001-0084). Exclusivity decides which
+    servers load; `MCPAllow` decides which of their tool calls the `default` and
+    `accept-edits` postures approve. They compose, and neither narrows the other.
+    An allow-list only ever sees calls from servers that loaded, so an allow-list
+    written for the planted servers was never a limit on a user-level server that
+    loads beside them; with exclusivity on, that server does not load.
+  - **User-level servers are left out on purpose.** A host that wants one passes
+    it as a planted server.
+  - **Nothing planted means nothing.** With exclusivity on and no MCP servers
+    planted, Claude loads none.
+- **`agentlaunch.ErrMCPExclusiveUnsupported`** is go-providers' own error, so
+  `errors.Is` matches it at every layer.
+
+### Changed
+
+- **A launch that asks for exclusivity and cannot get it is refused, never run
+  without it.**
+  - `launcher.Compile` refuses a runtime and mode go-providers does not declare
+    exclusive (OpenCode, Antigravity, every ACP mode), before any filesystem work.
+  - `providerplant` passes the option to the projection and then judges the
+    projection it got back with `provider.CheckMCPExclusive`, so a pinned adapter
+    or a custom resolver that ignores the option is refused. A provider planted
+    from a `BootDirSpec` alone is refused too.
+  - For a mode whose exclusivity is its config root (Codex), the preparer checks
+    the final merged environment still carries the launch's `CODEX_HOME`. The
+    launch's value has provider precedence, so a plan's own `Provider.Env` cannot
+    move it; this guards anything that merges after it.
+
+- When flag-based exclusivity is requested with planted servers (including
+  loopback and self-MCP entries), the final argv must carry a nonempty
+  `--mcp-config` value before the prompt. Otherwise preparation is refused
+  instead of silently loading no servers. Empty planted sets remain valid.
+
+- A plan-supplied `CODEX_HOME` in `Provider.Env` or `Injection.Env` is refused
+  when exclusivity uses the projected config root. Provider precedence and
+  the final environment guard remain underneath; unset exclusivity behaves
+  as before.
+
+### Not done yet
+
+- No catalog field carries it yet; a host sets `ProviderSpec.MCPExclusive`.
+
+### Tests
+
+- Every supported provider and mode: not asked leaves the argv and environment as
+  they were; asked adds exactly the flag (Claude), nothing (Codex) or is refused,
+  naming provider and mode.
+- A plan's own `CODEX_HOME` is refused with config-root exclusivity; a custom
+  adapter that ignores the option is refused; a `BootDirSpec`-only provider is refused; the environment
+  guard refuses a root that did not survive the merge, and the preparer runs it
+  exactly when exclusivity was asked for.
+- `Compile` refuses every runtime and mode go-providers declares no mechanism for,
+  naming provider and mode, and compiles the rest; a plan that does not ask
+  compiles as before.
+- Mutations that fail a test: the option not passed to the projection, the
+  projection not judged, a `BootDirSpec`-only provider not refused, the environment
+  guard dropped or run when not asked, `Compile`'s check removed, reverted to
+  refusing only an unmeasured mode, or no longer naming the mode, and the field
+  losing `omitempty`. The final MCP argv guard and contradictory CODEX_HOME
+  refusal each have a failing mutation check.
+
 ## v0.21.3 — 2026-10-01
 
 ### Added

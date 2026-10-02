@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/hollis-labs/agentkit/agentlaunch"
 	"github.com/hollis-labs/agentkit/agentlaunch/matrix"
 	permission "github.com/hollis-labs/go-permission"
+	"github.com/hollis-labs/go-providers/registry"
 )
 
 // fixedTime is the pinned wall-clock value tests use to make Compile's
@@ -288,5 +290,64 @@ func TestCompileResolvedProviderBinaryOverride(t *testing.T) {
 	}
 	if got.ResolvedProviderBinary != "/abs/custom/claude" {
 		t.Fatalf("ResolvedProviderBinary = %q, want %q", got.ResolvedProviderBinary, "/abs/custom/claude")
+	}
+}
+
+// Provider.MCPExclusive is the plan's request to be kept to the MCP servers it
+// plants. Compile refuses it for a runtime and mode go-providers declares no
+// mechanism for, naming provider and mode, before any filesystem work; a plan
+// that does not ask compiles as it always did (CW-20261001-0225).
+func TestCompileMCPExclusive(t *testing.T) {
+	for _, pair := range matrix.Supported() {
+		t.Run(pair.String(), func(t *testing.T) {
+			d, ok := registry.Lookup(string(pair.ProviderID))
+			if !ok {
+				t.Fatalf("%s: not in the registry", pair)
+			}
+			p := validPlanForCompile()
+			p.Provider.ID = string(pair.ProviderID)
+			p.Runtime = pair.Runtime
+			if _, err := Compile(context.Background(), p); err != nil {
+				t.Fatalf("not asked: Compile = %v", err)
+			}
+			p.Provider.MCPExclusive = true
+			_, err := Compile(context.Background(), p)
+			if d.MCPExclusivity(pair.Runtime).Exclusive() {
+				if err != nil {
+					t.Errorf("a mode with a mechanism: Compile = %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, agentlaunch.ErrMCPExclusiveUnsupported) {
+				t.Fatalf("a mode with no mechanism: Compile = %v, want ErrMCPExclusiveUnsupported", err)
+			}
+			for _, want := range []string{string(pair.ProviderID), string(pair.Runtime)} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %q", err, want)
+				}
+			}
+		})
+	}
+	// Anchors, so the table above cannot pass by every pair agreeing on nothing.
+	for _, c := range []struct {
+		provider string
+		runtime  runtimes.Mode
+		ok       bool
+	}{
+		{"claude", runtimes.ModePTY, true},
+		{"claude", runtimes.ModeStreamingStdio, true},
+		{"codex", runtimes.ModeSubprocessPerTurn, true},
+		{"opencode", runtimes.ModeSubprocessPerTurn, false},
+		{"antigravity", runtimes.ModeSubprocessPerTurn, false},
+		{"copilot", runtimes.ModeACPStdio, false},
+	} {
+		p := validPlanForCompile()
+		p.Provider.ID = c.provider
+		p.Runtime = c.runtime
+		p.Provider.MCPExclusive = true
+		_, err := Compile(context.Background(), p)
+		if c.ok != (err == nil) {
+			t.Errorf("%s/%s: Compile = %v, want ok=%v", c.provider, c.runtime, err, c.ok)
+		}
 	}
 }
