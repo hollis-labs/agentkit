@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -99,9 +101,11 @@ func (s *streamingStdioSession) InterruptTurn(ctx context.Context) error {
 	}
 	id, answer := s.interrupts.register()
 	defer s.interrupts.forget(id)
-	frame := append(interrupter.InterruptRequest(id), '\n')
-	werr := writeInterrupt(ctx, s.stdin, frame)
-	s.ioLock.Unlock()
+	werr := func() error {
+		defer s.ioLock.Unlock()
+		frame := append(interrupter.InterruptRequest(id), '\n')
+		return writeInterrupt(ctx, s.stdin, frame)
+	}()
 	if werr != nil {
 		return werr
 	}
@@ -113,10 +117,20 @@ func (s *streamingStdioSession) InterruptTurn(ctx context.Context) error {
 	}
 }
 
+// maxInterruptFrameBytes includes the trailing newline. Linux pollable pipes
+// atomically write frames up to PIPE_BUF (4096 bytes); larger writes can leave
+// a partial NDJSON line on cancellation and corrupt a successor input. The
+// current Claude control request is much smaller. Reject oversized frames
+// before any write, including with a Background context.
+const maxInterruptFrameBytes = 4096
+
 // writeInterrupt is called while ioLock is held. StdinPipe supplies a pollable
 // *os.File. Its write deadline wakes a blocked write without closing the pipe or
 // abandoning a writer goroutine that could later interrupt a successor turn.
 func writeInterrupt(ctx context.Context, stdin io.WriteCloser, frame []byte) error {
+	if len(frame) > maxInterruptFrameBytes {
+		return fmt.Errorf("%w: %d bytes, maximum %d including newline", ErrInterruptFrameTooLarge, len(frame), maxInterruptFrameBytes)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -132,6 +146,13 @@ func writeInterrupt(ctx context.Context, stdin io.WriteCloser, frame []byte) err
 		return fmt.Errorf("agentsessions: interrupt stdin does not support write deadlines")
 	}
 	if err := pipe.SetWriteDeadline(time.Time{}); err != nil {
+		// os.File.SetWriteDeadline may expose an internal poll closing error that
+		// does not match os.ErrClosed. Stat retains os.File's public error identity.
+		if file, ok := stdin.(interface{ Stat() (os.FileInfo, error) }); ok {
+			if _, statErr := file.Stat(); errors.Is(statErr, os.ErrClosed) {
+				return errors.Join(ErrNoInputChannel, statErr)
+			}
+		}
 		return fmt.Errorf("agentsessions: interrupt stdin deadline: %w", err)
 	}
 	stopped := make(chan struct{})

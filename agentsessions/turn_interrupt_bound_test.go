@@ -3,8 +3,10 @@
 package agentsessions
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -193,4 +195,184 @@ func TestStreamingInterruptPreCancelledAndMissingInput(t *testing.T) {
 		t.Error("missing input changed")
 	}
 	s.ioLock.Unlock()
+}
+
+// delayedDeadlinePipe forces cancellation's deadline callback to finish after
+// Write has succeeded. Waiting for entered makes the callback race deterministic.
+type delayedDeadlinePipe struct {
+	*os.File
+	cancel   context.CancelFunc
+	entered  chan struct{}
+	finished chan struct{}
+}
+
+func (p *delayedDeadlinePipe) Write(b []byte) (int, error) {
+	n, err := p.File.Write(b)
+	p.cancel()
+	<-p.entered
+	return n, err
+}
+func (p *delayedDeadlinePipe) SetWriteDeadline(at time.Time) error {
+	if at.IsZero() {
+		return p.File.SetWriteDeadline(at)
+	}
+	close(p.entered)
+	time.Sleep(80 * time.Millisecond)
+	err := p.File.SetWriteDeadline(at)
+	close(p.finished)
+	return err
+}
+
+func TestStreamingInterruptJoinsDeadlineBeforeNextInput(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
+	if err := r.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := &delayedDeadlinePipe{File: w, cancel: cancel, entered: make(chan struct{}), finished: make(chan struct{})}
+	s := interruptSession(p)
+	if err := s.InterruptTurn(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
+	}
+	select {
+	case <-p.finished:
+	default:
+		// Join even in a failing implementation so the fixture leaves no callback.
+		<-p.finished
+		t.Fatal("interrupt returned before deadline callback finished")
+	}
+	// Swap only the wrapper out after cancellation; reuse the same os.File and
+	// deadline. A non-joined callback or an uncleared deadline breaks this write.
+	s.stdin = w
+	if err := s.SendInput(context.Background(), []byte("successor")); err != nil {
+		t.Fatal(err)
+	}
+	// The successful interrupt frame remains a complete line, followed by input.
+	buf := make([]byte, 4096)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasSuffix(buf[:n], []byte("\nsuccessor\n")) {
+		t.Fatalf("stdin = %q", buf[:n])
+	}
+	assertNoInterruptWaiters(t, s)
+}
+
+type customInterruptAdapter struct {
+	provider.CLIAdapter
+	provider.TurnInterrupter
+	frame        []byte
+	panicRequest bool
+}
+
+func (a customInterruptAdapter) InterruptRequest(string) []byte {
+	if a.panicRequest {
+		panic("bad interrupt adapter")
+	}
+	return a.frame
+}
+
+func TestStreamingInterruptOversizedFrameAndAdapterPanic(t *testing.T) {
+	for _, panics := range []bool{false, true} {
+		t.Run(fmt.Sprint(panics), func(t *testing.T) {
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = r.Close() }()
+			defer func() { _ = w.Close() }()
+			if err := r.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			p := &notifyPipe{File: w, entered: make(chan struct{})}
+			s := interruptSession(p)
+			a := provider.NewClaudeAdapterStreamingStdio()
+			s.adapter = customInterruptAdapter{CLIAdapter: a, TurnInterrupter: a, frame: bytes.Repeat([]byte("x"), 4096), panicRequest: panics}
+			if panics {
+				func() {
+					defer func() {
+						if recover() == nil {
+							t.Error("adapter did not panic")
+						}
+					}()
+					_ = s.InterruptTurn(context.Background())
+				}()
+			} else {
+				if err := s.InterruptTurn(context.Background()); !errors.Is(err, ErrInterruptFrameTooLarge) {
+					t.Fatalf("error = %v", err)
+				}
+			}
+			select {
+			case <-p.entered:
+				t.Fatal("rejected interrupt wrote bytes")
+			default:
+			}
+			assertNoInterruptWaiters(t, s)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := s.ioLock.LockContext(ctx); err != nil {
+				t.Fatalf("lock retained: %v", err)
+			}
+			s.stdin = w
+			s.ioLock.Unlock()
+			if err := s.SendInput(context.Background(), []byte("successor")); err != nil {
+				t.Fatal(err)
+			}
+			got := make([]byte, len("successor\n"))
+			if _, err := io.ReadFull(r, got); err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != "successor\n" {
+				t.Fatalf("corrupted input: %q", got)
+			}
+		})
+	}
+}
+
+func TestStreamingInterruptClosedPipePreservesErrorIdentity(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s := interruptSession(w)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.InterruptTurn(ctx); !errors.Is(err, os.ErrClosed) || !errors.Is(err, ErrNoInputChannel) {
+		t.Fatalf("closed input error = %v", err)
+	}
+	assertNoInterruptWaiters(t, s)
+}
+
+func TestInterruptFrameAtomicSizeBoundary(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
+	if err := r.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	frame := append(bytes.Repeat([]byte("x"), 4095), '\n')
+	if err := writeInterrupt(context.Background(), w, frame); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, len(frame))
+	if _, err := io.ReadFull(r, got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, frame) {
+		t.Fatal("atomic-limit frame changed")
+	}
 }

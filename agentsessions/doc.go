@@ -49,6 +49,8 @@
 //     cancellation bounds input-lock acquisition, stdin writing and the ACK
 //     wait. The pipe stays open; a canceled waiter cannot later write an
 //     interrupt, and its write deadline is cleared before the next input.
+//     Interrupt frames over 4096 bytes (including newline) are refused with
+//     ErrInterruptFrameTooLarge, preserving atomic writes on Linux pipes.
 //   - SessionIDer, CheckpointHinter, PIDReporter, SandboxOutcomeReporter.
 //
 // A Manager registers Sessions, persists state transitions through
