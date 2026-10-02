@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/hollis-labs/go-providers/provider"
 )
@@ -79,7 +82,9 @@ func (in *interrupts) observe(adapter provider.TurnInterrupter, line []byte) {
 // the event stream the CLI's own way: for Claude, an error result whose
 // terminal_reason is aborted_tools or aborted_streaming. The process stays
 // up and SendInput starts the next turn. With no turn in flight, Claude
-// acknowledges and nothing else happens.
+// acknowledges and nothing else happens. Context cancellation bounds input-lock
+// acquisition and pipe writing as well as acknowledgement; a canceled lock
+// waiter never writes a deferred interrupt to a later turn.
 func (s *streamingStdioSession) InterruptTurn(ctx context.Context) error {
 	interrupter, ok := s.adapter.(provider.TurnInterrupter)
 	if !ok {
@@ -91,28 +96,84 @@ func (s *streamingStdioSession) InterruptTurn(ctx context.Context) error {
 	if !s.alive.Load() {
 		return ErrNoInputChannel
 	}
-	id, answer := s.interrupts.register()
-	frame := append(interrupter.InterruptRequest(id), '\n')
-	s.ioLock.Lock()
-	stdin := s.stdin
-	var werr error
-	if stdin == nil {
-		werr = ErrNoInputChannel
-	} else {
-		_, werr = stdin.Write(frame)
+	if err := s.ioLock.LockContext(ctx); err != nil {
+		return err
 	}
-	s.ioLock.Unlock()
+	id, answer := s.interrupts.register()
+	defer s.interrupts.forget(id)
+	werr := func() error {
+		defer s.ioLock.Unlock()
+		frame := append(interrupter.InterruptRequest(id), '\n')
+		return writeInterrupt(ctx, s.stdin, frame)
+	}()
 	if werr != nil {
-		s.interrupts.forget(id)
 		return werr
 	}
 	select {
 	case err := <-answer:
 		return err
 	case <-ctx.Done():
-		s.interrupts.forget(id)
 		return ctx.Err()
 	}
+}
+
+// maxInterruptFrameBytes includes the trailing newline. Linux pollable pipes
+// atomically write frames up to PIPE_BUF (4096 bytes); larger writes can leave
+// a partial NDJSON line on cancellation and corrupt a successor input. The
+// current Claude control request is much smaller. Reject oversized frames
+// before any write, including with a Background context.
+const maxInterruptFrameBytes = 4096
+
+// writeInterrupt is called while ioLock is held. StdinPipe supplies a pollable
+// *os.File. Its write deadline wakes a blocked write without closing the pipe or
+// abandoning a writer goroutine that could later interrupt a successor turn.
+func writeInterrupt(ctx context.Context, stdin io.WriteCloser, frame []byte) error {
+	if len(frame) > maxInterruptFrameBytes {
+		return fmt.Errorf("%w: %d bytes, maximum %d including newline", ErrInterruptFrameTooLarge, len(frame), maxInterruptFrameBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if stdin == nil {
+		return ErrNoInputChannel
+	}
+	if ctx.Done() == nil {
+		_, err := stdin.Write(frame)
+		return err
+	}
+	pipe, ok := stdin.(interface{ SetWriteDeadline(time.Time) error })
+	if !ok {
+		return fmt.Errorf("agentsessions: interrupt stdin does not support write deadlines")
+	}
+	if err := pipe.SetWriteDeadline(time.Time{}); err != nil {
+		// os.File.SetWriteDeadline may expose an internal poll closing error that
+		// does not match os.ErrClosed. Stat retains os.File's public error identity.
+		if file, ok := stdin.(interface{ Stat() (os.FileInfo, error) }); ok {
+			if _, statErr := file.Stat(); errors.Is(statErr, os.ErrClosed) {
+				return errors.Join(ErrNoInputChannel, statErr)
+			}
+		}
+		return fmt.Errorf("agentsessions: interrupt stdin deadline: %w", err)
+	}
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = pipe.SetWriteDeadline(time.Now())
+		close(stopped)
+	})
+	_, err := stdin.Write(frame)
+	if !stop() {
+		<-stopped
+	}
+	// Join cancellation and reset while holding ioLock: neither the callback nor
+	// an expired deadline may affect the next writer.
+	resetErr := pipe.SetWriteDeadline(time.Time{})
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		return err
+	}
+	return resetErr
 }
 
 // followTurn tracks the open turn through the adapter's

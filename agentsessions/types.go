@@ -807,6 +807,10 @@ var (
 	// session's adapter has no turn interrupt (provider.TurnInterrupter).
 	ErrInterruptUnsupported = errors.New("agentsessions: the session's adapter cannot interrupt a turn")
 
+	// ErrInterruptFrameTooLarge rejects a streaming interrupt frame over the
+	// atomic pipe-write limit (4096 bytes including its trailing newline).
+	ErrInterruptFrameTooLarge = errors.New("agentsessions: interrupt frame exceeds atomic pipe write limit")
+
 	// ErrInterruptUnanswered is returned by InterruptTurn when the
 	// session's output ends before the CLI acknowledged the interrupt.
 	ErrInterruptUnanswered = errors.New("agentsessions: the session ended before the interrupt was acknowledged")

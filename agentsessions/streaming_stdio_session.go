@@ -175,7 +175,7 @@ type streamingStdioSession struct {
 	// don't interleave bytes on stdin) and against the wait goroutine's
 	// nil-clear + Close pair. The reader goroutine captures stdout at
 	// spawn and does not take this lock.
-	ioLock sync.Mutex
+	ioLock stdioLock
 
 	state atomic.Int32 // LiveState
 	alive atomic.Bool
