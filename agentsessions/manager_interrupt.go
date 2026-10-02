@@ -24,5 +24,14 @@ func (m *Manager) InterruptTurn(ctx context.Context, id string) error {
 	if !ok {
 		return ErrInterruptUnsupported
 	}
+	if readiness, ok := e.sess.(TurnInterruptReadiness); ok {
+		ready, err := readiness.TurnInterruptReady()
+		if err != nil {
+			return err
+		}
+		if !ready {
+			return ErrTurnNotStarted
+		}
+	}
 	return interrupter.InterruptTurn(ctx)
 }
