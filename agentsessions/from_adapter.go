@@ -265,6 +265,11 @@ type adapterSession struct {
 	// a plain bool is safe; atomic.Bool is used anyway for consistency
 	// with the rest of this struct's fields.
 	turnSawTerminal atomic.Bool
+	// turnSawTypedTerminal is the same for the typed surface: the tap delivered
+	// an events.Done or events.Error to TypedEventCallback this turn. Synthesis
+	// consults it so a turn that ends without a terminal line reaches the typed
+	// callback exactly once, never twice.
+	turnSawTypedTerminal atomic.Bool
 
 	// Per-turn resume bookkeeping for provider.SessionResumeVerifier
 	// adapters. Written at the top of SendInput and read from
@@ -374,6 +379,7 @@ func (s *adapterSession) SendInput(ctx context.Context, data []byte) error {
 	turnID := defaultIDFn()
 	s.turnID.Store(turnID)
 	s.turnSawTerminal.Store(false)
+	s.turnSawTypedTerminal.Store(false)
 	s.state.Store(int32(LiveStateProcessing))
 	defer s.state.Store(int32(LiveStateIdle))
 
@@ -486,6 +492,32 @@ func (s *adapterSession) synthesizeTerminalEvent(runErr error) {
 			_, _ = s.opts.Fanout.Write(line)
 		}
 	}
+	s.synthesizeTypedTerminal(runErr)
+}
+
+// synthesizeTypedTerminal gives TypedEventCallback the terminal event of a turn
+// the adapter never ended: events.Done on a clean exit, events.Error otherwise.
+// The typed surface is the lossless one, so a consumer that reduces turns from
+// it (go-agent-wrapper's turnoutput, Tether) would otherwise wait forever for
+// the end of a turn whose process died, failed on stderr alone or printed no
+// terminal line, and the next turn's events would join it. It runs only for a
+// session that taps typed events (an adapter with ParseLineEvents), the contract
+// being that a tapped session's turn always ends on the typed surface, and only
+// when the tap has not already delivered the turn's own terminal event.
+func (s *adapterSession) synthesizeTypedTerminal(runErr error) {
+	cb := s.opts.TypedEventCallback
+	if cb == nil || s.turnSawTypedTerminal.Load() {
+		return
+	}
+	if _, tapped := s.adapter.(provider.EventParser); !tapped {
+		return
+	}
+	s.turnSawTypedTerminal.Store(true)
+	if runErr != nil {
+		cb(events.Error{Err: runErr, Message: runErr.Error()})
+		return
+	}
+	cb(events.Done{})
 }
 
 // handleRunnerEvent forwards runner events to the Fanout writer (which
@@ -649,7 +681,7 @@ func (s *adapterSession) turnAdapter() provider.CLIAdapter {
 	if !ok {
 		return s.adapter
 	}
-	return &typedEventTap{CLIAdapter: s.adapter, parser: parser, cb: s.opts.TypedEventCallback, fanout: s.opts.Fanout}
+	return &typedEventTap{CLIAdapter: s.adapter, parser: parser, cb: s.opts.TypedEventCallback, fanout: s.opts.Fanout, sawTerminal: &s.turnSawTypedTerminal}
 }
 
 type typedEventTap struct {
@@ -657,6 +689,9 @@ type typedEventTap struct {
 	parser provider.EventParser
 	cb     provider.EventsCallback // nil when the caller did not ask for typed events
 	fanout io.Writer
+	// sawTerminal is set when the tap delivers a terminal event, so the
+	// session does not synthesize a second one at the end of the turn.
+	sawTerminal *atomic.Bool
 }
 
 func (t *typedEventTap) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
@@ -664,6 +699,10 @@ func (t *typedEventTap) ParseLine(line []byte) ([]llmtypes.StreamEvent, error) {
 		for _, ev := range evs {
 			if t.cb != nil {
 				t.cb(ev)
+			}
+			switch ev.(type) {
+			case events.Done, events.Error:
+				t.sawTerminal.Store(true)
 			}
 			// Permission denials have no StreamEvent form; mark them on
 			// the byte Fanout so an attached reader sees the no-op.

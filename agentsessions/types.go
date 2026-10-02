@@ -546,8 +546,19 @@ type StartOptions struct {
 	//     stdout line when the adapter implements provider.EventParser (the
 	//     adapter is tapped for the turn, so typed events arrive in line
 	//     order alongside ParseLine's), plus the session layer's own
-	//     events.SessionLost and events.AuthFailed. Adapters without
-	//     EventParser produce only those two here.
+	//     events.SessionLost and events.AuthFailed. A turn that ends
+	//     without the adapter emitting a terminal event (the process
+	//     died, failed on stderr alone, or printed no terminal line) ends
+	//     with a synthesized events.Done on a clean exit or events.Error
+	//     otherwise, once per turn, as EventFanout's synthesized terminal
+	//     event does; a turn the adapter ends itself gets no second one.
+	//     Adapters without EventParser produce only SessionLost and
+	//     AuthFailed here, and no terminal event.
+	//   - The PTY, streaming-stdio and JSON-RPC runtimes keep one process for
+	//     the session, so a process that dies ends the session rather than
+	//     one turn, and no per-turn terminal event is synthesized; a host
+	//     that reduces turns closes the one in progress when the session
+	//     ends (go-agent-wrapper's turnoutput Reducer.Flush).
 	//   - The serve-http runtime does not call it.
 	//
 	// Sends are synchronous; treat the callback the way you'd treat an

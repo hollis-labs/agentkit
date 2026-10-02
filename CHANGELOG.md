@@ -4,6 +4,48 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.23.1 — 2026-10-02
+
+A subprocess-per-turn turn that ends without a terminal line now ends on the
+typed surface too (CW-20261002-0061, found by Tether's turn-output task).
+
+### Fixed
+
+- **`TypedEventCallback` never saw the terminal event the session synthesizes for
+  a turn the adapter did not end.** When the process died, failed on stderr alone
+  (a sign-in failure, say) or printed no terminal line, `synthesizeTerminalEvent`
+  gave `EventFanout` and the byte `Fanout` an `EventDone` or `EventError`, and the
+  typed callback got nothing. A consumer reducing turns from the typed callback
+  (the lossless surface, which it should use) waited forever for the end of that
+  turn, and the next turn's events joined it.
+  - **Now:** a session that taps typed events (an adapter with `ParseLineEvents`,
+    which the four built-in adapters and Tether's wrapper have) ends such a turn on
+    the typed surface with `events.Done` on a clean exit or `events.Error`
+    (carrying the run error) otherwise, once per turn. A turn the adapter ends
+    itself gets no second terminal event, including an adapter whose typed parser
+    ends the turn and whose legacy parser does not.
+  - An adapter with no typed parser still reports nothing on the typed surface, as
+    documented.
+
+### Documented
+
+- **The PTY, streaming-stdio and JSON-RPC runtimes synthesize no per-turn
+  terminal event**: they keep one process for the session, so a process that dies
+  ends the session, not one turn. A host that reduces turns closes the one in
+  progress when the session ends (go-agent-wrapper's `Reducer.Flush`). The
+  serve-http runtime does not call the typed callback at all.
+
+### Tests
+
+- The synthesized terminal on a clean exit with no terminal line, a failing
+  process (an error naming the exit code), a process that fails before any output,
+  and two turns in a row (each ends once); the real Claude adapter against its
+  captured turn (one terminal, no second) and against a process that dies after an
+  assistant message (the delta, then an error). Not double-fired for an adapter
+  that ends its own turn, nor for one whose typed parser alone ends it; silent for
+  an adapter with no typed parser. Each of these fails if the synthesis, the
+  per-turn reset or the terminal marker is removed.
+
 ## v0.23.0 — 2026-10-02
 
 A Codex app-server turn now reports what it said, what it ran and when it ended
