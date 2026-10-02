@@ -218,10 +218,12 @@ type serveHTTPSession struct {
 	// compactionMessages are the ids of OpenCode's compaction summary
 	// messages, whose deltas are not the reply; reasoningParts are the ids
 	// of reasoning parts, whose deltas are the model thinking. Both hold
-	// one turn's ids: SendInput resets them (resetTurnMarks).
+	// one turn's ids: SendInput resets them (resetTurnMarks). usageParts are
+	// the step-finish parts whose usage was reported, so none counts twice.
 	compactionMu       sync.Mutex
 	compactionMessages map[string]bool
 	reasoningParts     map[string]bool
+	usageParts         map[string]bool
 
 	streamCancel context.CancelFunc
 }
@@ -550,8 +552,12 @@ func (s *serveHTTPSession) handleSSEData(data []byte) {
 			s.markCompactionMessage(ev.Properties.Info.ID)
 		}
 	case "message.part.updated":
-		if ev.Properties.Part.Type == "reasoning" && ev.Properties.Part.ID != "" {
-			s.markReasoningPart(ev.Properties.Part.ID)
+		part := ev.Properties.Part
+		switch {
+		case part.Type == "reasoning" && part.ID != "":
+			s.markReasoningPart(part.ID)
+		case part.Type == "step-finish":
+			s.reportStepUsage(part)
 		}
 	case "message.part.delta", "session.next.text.delta":
 		// A compaction summary streams as this session's deltas too, but
@@ -641,10 +647,26 @@ type sseMessageInfo struct {
 }
 
 // ssePart is the part a message.part.updated event describes: its id and
-// type ("text", "reasoning", "tool", "step-start", ...).
+// type ("text", "reasoning", "tool", "step-start", "step-finish", ...). A
+// step-finish part also carries the step's reason, tokens and cost.
 type ssePart struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
+	ID     string         `json:"id"`
+	Type   string         `json:"type"`
+	Reason string         `json:"reason"`
+	Cost   float64        `json:"cost"`
+	Tokens *sseStepTokens `json:"tokens"`
+}
+
+// sseStepTokens are a step-finish part's token counts. Total is the step's
+// context size, not a count to sum, and is not read.
+type sseStepTokens struct {
+	Input     int `json:"input"`
+	Output    int `json:"output"`
+	Reasoning int `json:"reasoning"`
+	Cache     struct {
+		Read  int `json:"read"`
+		Write int `json:"write"`
+	} `json:"cache"`
 }
 
 // isCompaction reports whether the message is OpenCode's compaction summary:
@@ -673,17 +695,62 @@ func (s *serveHTTPSession) markReasoningPart(id string) {
 	s.reasoningParts[id] = true
 }
 
-// resetTurnMarks forgets the previous turn's reasoning parts and compaction
-// messages (CW-20261001-0224). Their ids are unique and are consulted only
-// for the deltas of the turn they belong to, so keeping them grew the maps
-// for the life of the session. It runs when the next turn starts, not when
-// one ends: a delta that follows its turn's ending event, as OpenCode sends
-// after an abort, must still be told from the reply.
+// reportStepUsage emits the usage of one finished step as an EventUsage,
+// the way OpenCode's run mode does for its step_finish line
+// (CW-20261001-0176): tokens and CostUSD are this step's, never a running
+// total (consumers sum them per turn); output tokens include the reasoning
+// tokens; the stop reason is the step's, normalized. It is not terminal: a
+// turn is one or more steps, and session.idle still ends it.
+//
+// OpenCode reports a step's totals on the assistant message as well, twice
+// over, and again for the compaction summary's own step; the step-finish
+// part is the one report per step. A part reported again is not counted
+// again.
+func (s *serveHTTPSession) reportStepUsage(part ssePart) {
+	if part.Tokens == nil || !s.markUsagePart(part.ID) {
+		return
+	}
+	tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{Type: llmtypes.EventUsage, Usage: &llmtypes.Usage{
+		InputTokens:         part.Tokens.Input,
+		OutputTokens:        part.Tokens.Output + part.Tokens.Reasoning,
+		CacheCreationTokens: part.Tokens.Cache.Write,
+		CacheReadTokens:     part.Tokens.Cache.Read,
+		StopReason:          llmtypes.NormalizeStopReason(part.Reason),
+		CostUSD:             part.Cost,
+	}})
+}
+
+// markUsagePart records that a step-finish part's usage was reported, and
+// says whether this is the first time. A part with no id cannot be told
+// apart, so it always counts.
+func (s *serveHTTPSession) markUsagePart(id string) bool {
+	if id == "" {
+		return true
+	}
+	s.compactionMu.Lock()
+	defer s.compactionMu.Unlock()
+	if s.usageParts[id] {
+		return false
+	}
+	if s.usageParts == nil {
+		s.usageParts = map[string]bool{}
+	}
+	s.usageParts[id] = true
+	return true
+}
+
+// resetTurnMarks forgets the previous turn's reasoning parts, compaction
+// messages and reported step-finish parts (CW-20261001-0224). Their ids are
+// unique and matter only to the turn they belong to, so keeping them grew
+// the maps for the life of the session. It runs when the next turn starts,
+// not when one ends: a delta that follows its turn's ending event, as
+// OpenCode sends after an abort, must still be told from the reply.
 func (s *serveHTTPSession) resetTurnMarks() {
 	s.compactionMu.Lock()
 	defer s.compactionMu.Unlock()
 	s.compactionMessages = nil
 	s.reasoningParts = nil
+	s.usageParts = nil
 }
 
 func (s *serveHTTPSession) isReasoningPart(id string) bool {

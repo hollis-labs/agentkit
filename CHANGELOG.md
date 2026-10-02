@@ -4,6 +4,37 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.21.3 — 2026-10-01
+
+### Added
+
+- **A serve-http (OpenCode) session reports tokens and cost** (CW-20261001-0176).
+  OpenCode's serve mode reports each step's tokens, cost and reason in a
+  `step-finish` part, but the session translated only text, errors and idle,
+  so every serve-http run recorded 0 tokens and no cost (all six of Torque's
+  overnight runs on 2026-10-01).
+  - The session now sends one `llmtypes.EventUsage` on `EventFanout` per
+    step, the way go-providers' run mode does for `step_finish`: input,
+    output (including reasoning tokens), cache read and write tokens, the
+    step's stop reason normalized (`tool-calls` is `tool_use`, `stop` is
+    `end_turn`, `length` is `max_tokens`), and `CostUSD` as that step's own
+    delta, not a running total. go-agent-wrapper already sums these per turn
+    onto `turn.completed`; it needs no change.
+  - Usage is not terminal: a turn is one or more steps and `session.idle`
+    still ends it, once.
+  - One report per step. OpenCode repeats a step's totals on the assistant
+    message's `message.updated`, twice, so that is not read; the
+    `step-finish` part is. A part reported again is not counted again (its
+    id is kept for the turn and forgotten with the other per-turn ids).
+  - The compaction summary's step is reported too: it is real spend.
+  - A step-finish with no tokens, or for another session, reports nothing.
+  - Tested by replaying a live capture of opencode 1.18.33 serve on the free
+    `opencode/big-pickle` model (a two-step turn: a bash tool call, then the
+    reply; scrubbed for this public repo) and by variants of the captured
+    shape for non-zero cost, reasoning and cache tokens, duplicates and
+    growth over many turns. The free model reports cost 0, so non-zero costs
+    come from the variants. Eight mutations of the change each fail a test.
+
 ## v0.21.2 — 2026-10-01
 
 ### Fixed
