@@ -432,6 +432,7 @@ func (s *jsonRpcStdioSession) runReaderLoop(stdout io.Reader) {
 		case frame.Method != "":
 			// Notification — no response expected.
 			s.followTurn(frame.Method, frame.Params)
+			s.reportCodexNotification(frame.Method, frame.Params)
 			if s.opts.JsonRpcNotificationHook != nil {
 				s.opts.JsonRpcNotificationHook(frame.Method, frame.Params)
 			}

@@ -4,6 +4,48 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.23.0 — 2026-10-02
+
+A Codex app-server turn now reports what it said and when it ended
+(CW-20261002-0061, ADR 0049).
+
+### Added
+
+- **The jsonrpc-stdio session reports a Codex turn on `EventFanout` and
+  `TypedEventCallback`.** Before, neither surface saw anything of an
+  app-server turn, because go-providers' Codex adapter leaves app-server's
+  JSON-RPC to the runtime and the runtime only forwarded notifications to
+  `JsonRpcNotificationHook`. A host (go-agent-wrapper, Tether) reading those
+  surfaces therefore saw no final message and no end of turn.
+  - `item/completed` for an `agentMessage` is one delta: block id is the item
+    id, phase is `final` for Codex's `final_answer`, `narration` for
+    `commentary`, and empty when Codex names none. The streamed
+    `item/agentMessage/delta` notifications are not reported, so a message is
+    never delivered twice.
+  - `turn/completed` is a done carrying the stop reason: `end_turn`, or
+    `cancelled` for status `interrupted`. On the legacy stream the stop reason
+    travels on a usage event ahead of the done, as it does for the other runtimes.
+    Status `failed` is an error carrying the turn's own message.
+  - User messages, commands and file changes yield nothing. Only the Codex
+    adapter gets this; another JSON-RPC adapter is untouched.
+  - `JsonRpcNotificationHook` still receives every notification, unchanged.
+
+### Tests
+
+- A captured Codex app-server transcript (go-providers' `codex/app_server_turn`,
+  two turns) through a real session: both surfaces report the same two messages
+  and ends. The `app_server_interrupt` capture ends its interrupted turn
+  `cancelled`. Table tests cover phases, empty and non-message items, the
+  streamed deltas, every turn status and the three shapes of a failed turn's
+  error. Without the adapter guard the non-Codex test fails.
+
+### Not covered
+
+- A Codex turn that is blocked on an approval or a `requestUserInput` request has
+  not ended, so it reports nothing until it does.
+- Token usage (`thread/tokenUsage/updated`) is still the host's to read; the
+  usage event carries only the stop reason.
+
 ## v0.22.0 — 2026-10-02
 
 A launch plan can ask to be kept to the MCP servers it plants (CW-20261001-0225).
