@@ -53,6 +53,8 @@
 // session output to attach subscribers via an in-memory ring buffer.
 // Manager.InterruptTurn forwards cancellation; callers wait for the terminal
 // event before submitting a replacement turn.
+// Optional TurnInterruptReadiness prevents acknowledgement before a runtime
+// handle is tracked (ErrTurnNotStarted); direct session calls keep their contract.
 //
 // # Composition
 //

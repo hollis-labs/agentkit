@@ -10,6 +10,8 @@ import "context"
 // Missing sessions return ErrSessionNotRunning. Sessions or adapters without
 // this capability return ErrInterruptUnsupported. Other errors, including
 // caller cancellation and provider refusals, propagate unchanged.
+// Sessions with TurnInterruptReadiness return ErrTurnNotStarted until their
+// runtime turn handle is tracked. Hosts may retry with a bounded deadline.
 //
 // The registry and input locks are not held across the call: a running
 // SendInput may be waiting for precisely the turn this request interrupts.
@@ -23,6 +25,15 @@ func (m *Manager) InterruptTurn(ctx context.Context, id string) error {
 	interrupter, ok := e.sess.(TurnInterrupter)
 	if !ok {
 		return ErrInterruptUnsupported
+	}
+	if readiness, ok := e.sess.(TurnInterruptReadiness); ok {
+		ready, err := readiness.TurnInterruptReady()
+		if err != nil {
+			return err
+		}
+		if !ready {
+			return ErrTurnNotStarted
+		}
 	}
 	return interrupter.InterruptTurn(ctx)
 }
