@@ -77,6 +77,86 @@ Takes go-providers v0.43.0. **Partly done; see "Not done yet".**
   guard dropped or run when not asked, `Compile`'s check removed, reverted to
   refusing only an unmeasured mode, or no longer naming the mode, and the field
   losing `omitempty`.
+## v0.21.2 — 2026-10-01
+
+### Fixed
+
+- **A serve-http (OpenCode) session no longer grows two maps for the life
+  of the session** (CW-20261001-0224). The ids of reasoning parts (v0.20.6)
+  and of compaction summary messages (v0.20.5) were kept forever, though
+  each is unique and matters only for the deltas of its own turn. They are
+  now forgotten when the next turn starts, so a session keeps one turn's
+  worth.
+  - They are cleared when the next turn starts, not when one ends, so a
+    delta that follows its turn's ending event (OpenCode sends late events
+    after an abort) is still told from the reply. A delta that arrives only
+    after the next prompt was sent is the one case this does not cover.
+  - Tested over 60 turns with fresh ids each: every turn's thinking, held
+    back summary and reply are still told apart, and the maps hold one
+    turn's ids at the end. Clearing at turn end, clearing only one of the
+    two maps, and not clearing each fail a test.
+
+## v0.21.1 — 2026-10-01
+
+### Fixed
+
+- **A streaming-stdio session reports a lost provider session**
+  (CW-20261001-0222). v0.20.2's session-lost handling covered only the
+  per-turn runtime. A Claude streaming session started to resume an id
+  Claude no longer has sees the child write "No conversation found with
+  session ID" to stderr and exit 1; the only output on the stream was an
+  error result with an empty message, so nothing said the session was lost
+  and go-agent-wrapper's `session.lost` never fired for the runtime every
+  Torque Claude profile uses.
+  - A resume attempt of an adapter that implements
+    `provider.SessionLostClassifier` now keeps a bounded tail of its stderr
+    (through a pipe the session owns; the caller's `StartOptions.Stderr`, or
+    the session log, still receives every byte the child wrote before it
+    exited, except that a descendant that keeps stderr open past the exit is
+    cut off after the same one-second drain as stdout, and the stderr and
+    stdout drains run one after the other). When the attempt exits abnormally
+    the tail is classified. A clean exit, an adapter with no classifier, and
+    an attempt that requested no resume id are never classified and behave as
+    before.
+  - **Only an attempt that never got going is classified.** A healthy
+    resume emits its init (a session id) first, and its stderr can mention
+    the same words, for instance in a tool's error line, so an attempt that
+    produced a session id or a finished turn is not a failed resume, however
+    late it later exits. Neither is an attempt the session or its supervisor
+    ended: `Stop`, a canceled ctx, or an idle or watchdog kill. Their
+    abnormal exits keep the ids, announce nothing, and a supervisor still
+    restarts a healthy session that crashes.
+  - On a loss the session emits `events.SessionLost` through
+    `TypedEventCallback` and the `[session_lost]` Fanout marker, once, with
+    the per-turn runtime's reason, after the child's final output. The dead
+    id is dropped from `ProviderSessionID`. `OnProviderSessionLost` is not
+    called, as for a failed per-turn resume.
+  - `SendInput` then fails with `*SessionLostError`, which still matches
+    `ErrNoInputChannel`. A `SendInput` whose write fails because the child
+    just died (a broken or closed pipe) waits up to three seconds for the
+    classification and returns the same error, wrapping both the write error
+    and `ErrNoInputChannel`, instead of a broken pipe. The wait ends early
+    with the caller's ctx and with `Stop`, and is skipped for any other write
+    error.
+  - The loss is decided right after the child exits and its stderr is
+    drained, before stdout is drained, and announced after the stdout drain.
+    So a `SendInput` made from a reader callback, which the stdout drain waits
+    for, sees the loss at once, rather than waiting for a classification that
+    is waiting for it. The cost: a `SendInput` can return `*SessionLostError`
+    a moment before the event is announced, by as long as the stdout drain
+    takes. The event is out before `Wait` returns.
+  - A lost session is not restarted by the supervisor: the restart would
+    resume the same dead id. Without this, `RestartOnCrash` would have
+    respawned it until exhausted.
+  - `Wait`'s error is unchanged (still the `*ExitError`).
+  - Tested by replaying go-providers' live `claude/stream_resume_unknown_id`
+    capture through the real Claude streaming adapter, with and without a
+    supervisor, plus stand-in CLIs: one that stops reading stdin so the write
+    fails; a healthy resume that later exits 1 (unsupervised, and restarted by
+    a supervisor); a `Stop`; a crash of a resumed session on unrelated stderr,
+    which restarts twice as before; and a `SendInput` from a reader callback
+    after the child died. The adapter without a classifier, a run with no
+    resume id, and a clean exit stay silent.
 
 ## v0.21.0 — 2026-10-01
 

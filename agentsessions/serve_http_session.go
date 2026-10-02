@@ -217,7 +217,8 @@ type serveHTTPSession struct {
 
 	// compactionMessages are the ids of OpenCode's compaction summary
 	// messages, whose deltas are not the reply; reasoningParts are the ids
-	// of reasoning parts, whose deltas are the model thinking.
+	// of reasoning parts, whose deltas are the model thinking. Both hold
+	// one turn's ids: SendInput resets them (resetTurnMarks).
 	compactionMu       sync.Mutex
 	compactionMessages map[string]bool
 	reasoningParts     map[string]bool
@@ -672,6 +673,19 @@ func (s *serveHTTPSession) markReasoningPart(id string) {
 	s.reasoningParts[id] = true
 }
 
+// resetTurnMarks forgets the previous turn's reasoning parts and compaction
+// messages (CW-20261001-0224). Their ids are unique and are consulted only
+// for the deltas of the turn they belong to, so keeping them grew the maps
+// for the life of the session. It runs when the next turn starts, not when
+// one ends: a delta that follows its turn's ending event, as OpenCode sends
+// after an abort, must still be told from the reply.
+func (s *serveHTTPSession) resetTurnMarks() {
+	s.compactionMu.Lock()
+	defer s.compactionMu.Unlock()
+	s.compactionMessages = nil
+	s.reasoningParts = nil
+}
+
 func (s *serveHTTPSession) isReasoningPart(id string) bool {
 	if id == "" {
 		return false
@@ -854,6 +868,7 @@ func (s *serveHTTPSession) SendInput(ctx context.Context, data []byte) error {
 	s.turnBusy = false
 	s.overflow = nil
 	s.turnMu.Unlock()
+	s.resetTurnMarks()
 
 	body, err := json.Marshal(map[string]any{
 		"parts": []map[string]any{{
