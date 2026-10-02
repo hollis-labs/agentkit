@@ -243,26 +243,15 @@ func projectArtifactsAndBinding(prepared *agentlaunch.PreparedLaunch, adapter pr
 	return artifacts, projection, binding, nil, err
 }
 
-// launchExtraArgs are the launch's own flags: the posture's, then
-// Provider.Flags, then Injection.Args. A caller's flag after the posture's is
-// the one a CLI that takes the last value honours.
-// requireExclusiveEnv checks, for a launch asked to be kept to its own MCP
-// servers, what the projection alone cannot show: that the environment the
-// process starts with still carries what the launch set. A mode whose
-// exclusivity is its projected config root (Codex's CODEX_HOME, registry.
-// MCPExclusivityProjectedLayout) holds only while the process reads that root, and the
-// caller's environment and the permission posture are merged after the launch's
-// own. The launch's variable wins over a caller's, so a plan's Provider.Env
-// cannot move the root; this refuses the launch should anything that merges
-// later do so.
 // checkExclusiveEnv is requireExclusiveEnv behind a variable, so a test can hold
 // that the preparer runs it exactly when exclusivity was asked for. Nothing else
 // assigns it.
 var checkExclusiveEnv = requireExclusiveEnv
 
-// A flag-based exclusive launch with planted servers must actually pass its
-// MCP config, otherwise the strict mode silently loads no servers. Check the
-// final argv, including host extras, without adding provider-owned flags.
+// requireExclusiveMCPArgv ensures a flag-based exclusive launch with planted
+// servers actually passes its MCP config; otherwise strict mode silently loads
+// no servers. Check the final argv, including host extras, without adding
+// provider-owned flags.
 func requireExclusiveMCPArgv(projection agentlaunch.ProviderProjection, ctx provider.PlantContext, argv []string) error {
 	d, ok := registry.Lookup(projection.Provider)
 	if !ok || d.MCPExclusivity(projection.Runtime) != registry.MCPExclusivityFlag ||
@@ -284,6 +273,15 @@ func requireExclusiveMCPArgv(projection agentlaunch.ProviderProjection, ctx prov
 		agentlaunch.ErrMCPExclusiveUnsupported, projection.Provider, projection.Runtime)
 }
 
+// requireExclusiveEnv checks, for a launch asked to be kept to its own MCP
+// servers, what the projection alone cannot show: that the environment the
+// process starts with still carries what the launch set. A mode whose
+// exclusivity is its projected config root (Codex's CODEX_HOME, registry.
+// MCPExclusivityProjectedLayout) holds only while the process reads that root, and the
+// caller's environment and the permission posture are merged after the launch's
+// own. The launch's variable wins over a caller's, so a plan's Provider.Env
+// cannot move the root; this refuses the launch should anything that merges
+// later do so.
 func requireExclusiveEnv(projection agentlaunch.ProviderProjection, set []provider.EnvDelta, env map[string]agentlaunch.EnvVar) error {
 	d, ok := registry.Lookup(projection.Provider)
 	if !ok || d.MCPExclusivity(projection.Runtime) != registry.MCPExclusivityProjectedLayout {
@@ -301,6 +299,9 @@ func requireExclusiveEnv(projection agentlaunch.ProviderProjection, set []provid
 	return nil
 }
 
+// launchExtraArgs are the launch's own flags: the posture's, then
+// Provider.Flags, then Injection.Args. A caller's flag after the posture's is
+// the one a CLI that takes the last value honours.
 func launchExtraArgs(plan *agentlaunch.LaunchPlan, posture registry.PostureLaunch) []string {
 	extras := make([]string, 0, len(posture.Args)+len(plan.Provider.Flags)+len(plan.Injection.Args))
 	extras = append(extras, posture.Args...)
