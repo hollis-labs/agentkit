@@ -461,9 +461,11 @@ type StartOptions struct {
 
 	// EventFanout receives parsed llmtypes.StreamEvent values as a
 	// best-effort mirror of the session stream. Sends are non-blocking;
-	// when the channel is full the event is dropped silently. Callers
-	// should supply a buffered channel sized to their consumer's
-	// tolerance and must not close it before the session is done.
+	// when the channel is full the event is dropped silently, whichever event
+	// it is: a stalled consumer loses the final message, the usage and the done
+	// of a turn. Callers should supply a buffered channel sized to their
+	// consumer's tolerance and must not close it before the session is done. A
+	// consumer that cannot afford a lost event uses TypedEventCallback.
 	EventFanout chan<- llmtypes.StreamEvent
 
 	// SessionIDPreset, when non-empty, is the provider-side session id
@@ -550,7 +552,12 @@ type StartOptions struct {
 	//
 	// Sends are synchronous; treat the callback the way you'd treat an
 	// io.Writer's Write — keep the work short or hand off to your own
-	// goroutine. Default nil disables the surface; nothing is allocated.
+	// goroutine. On the JSON-RPC runtime the callback runs on the session's
+	// reader goroutine, so a callback that calls the session's Call, or waits on
+	// anything that needs the reader, deadlocks the session: hand the work off.
+	// Unlike EventFanout, the callback never drops an event, which is why a host
+	// that must see every turn's final message and end (a turn reducer) should
+	// use it. Default nil disables the surface; nothing is allocated.
 	TypedEventCallback provider.EventsCallback
 
 	// Supervisor, when non-nil, enables process supervision: idle-kill,
