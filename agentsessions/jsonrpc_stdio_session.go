@@ -520,6 +520,8 @@ func (s *jsonRpcStdioSession) respondToServerRequest(frame jsonRpcFrame) {
 	}
 	s.ioLock.Unlock()
 	s.tickActivity()
+	_, refused := resp["error"]
+	s.reportCodexRequest(frame, refused)
 }
 
 // failPendingOnClose drains the pending map at reader-exit time, signalling

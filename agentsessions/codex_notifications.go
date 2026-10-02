@@ -2,6 +2,7 @@ package agentsessions
 
 import (
 	"encoding/json"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/hollis-labs/agent-contracts-leaf/runtimes"
@@ -67,6 +68,40 @@ func (s *jsonRpcStdioSession) codexItemSeen(id string) bool {
 	s.codexSeen[id] = struct{}{}
 	s.codexSeenOrder = append(s.codexSeenOrder, id)
 	return false
+}
+
+// codexUserInputMethod is the server request Codex sends when its model asks the
+// user a question (the request_user_input tool); a host that answers no one
+// refuses it.
+const codexUserInputMethod = "requestuserinput"
+
+// reportCodexRequest gives the events a Codex server request carries to
+// EventFanout and TypedEventCallback, after the session has answered it. Only a
+// request for user input is reported: as a call to the request_user_input tool,
+// with the request's params as its arguments (the questions) and, on the typed
+// surface, a tool result that is an error when the request was refused and not
+// when a hook answered it. Approvals are reported by the item they gate instead
+// (a declined item is a refusal, see codexNotificationEvents), and every other
+// request yields nothing.
+//
+// Like reportCodexNotification it runs on the reader goroutine.
+func (s *jsonRpcStdioSession) reportCodexRequest(frame jsonRpcFrame, refused bool) {
+	if s.adapter.Name() != string(runtimes.Codex) || frame.ID == nil ||
+		!strings.HasSuffix(strings.ToLower(frame.Method), codexUserInputMethod) {
+		return
+	}
+	id := strings.Trim(strings.TrimSpace(string(*frame.ID)), `"`)
+	args := map[string]any{}
+	_ = json.Unmarshal(frame.Params, &args)
+	const name = "request_user_input"
+	tryEventFanout(s.opts.EventFanout, llmtypes.StreamEvent{
+		Type:    llmtypes.EventToolUse,
+		ToolUse: &llmtypes.ToolUseBlock{ID: id, Name: name, Input: args},
+	})
+	if s.opts.TypedEventCallback != nil {
+		s.opts.TypedEventCallback(pevents.ToolUse{ID: id, Name: name, Args: args})
+		s.opts.TypedEventCallback(pevents.ToolResult{ID: id, IsError: refused})
+	}
 }
 
 // codexTranslation is what one notification reports: the same events on both
@@ -142,12 +177,19 @@ func codexNotificationEvents(method string, params json.RawMessage) codexTransla
 					args["changes"] = changes
 				}
 			}
+			typed := []pevents.Event{
+				pevents.ToolUse{ID: item.ID, Name: item.Type, Args: args},
+				pevents.ToolResult{ID: item.ID, IsError: item.Status == "failed" || item.Status == "declined", ContentPreview: cutPreview(item.AggregatedOutput)},
+			}
+			// A declined item is the posture refusing the action Codex asked
+			// about: Codex's own record that it did not happen, which a consumer
+			// would otherwise read as a tool call that merely did nothing.
+			if item.Status == "declined" {
+				typed = append(typed, pevents.PermissionDenied{Action: item.Type, DisplayName: codexItemLabel(item.Type, item.Command, item.Changes), ToolUseID: item.ID})
+			}
 			return codexTranslation{
 				stream: []llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: item.ID, Name: item.Type, Input: args}}},
-				typed: []pevents.Event{
-					pevents.ToolUse{ID: item.ID, Name: item.Type, Args: args},
-					pevents.ToolResult{ID: item.ID, IsError: item.Status == "failed" || item.Status == "declined", ContentPreview: cutPreview(item.AggregatedOutput)},
-				},
+				typed:  typed,
 				itemID: item.ID,
 			}
 		}
@@ -177,6 +219,29 @@ func codexNotificationEvents(method string, params json.RawMessage) codexTransla
 		}
 	}
 	return codexTranslation{}
+}
+
+// codexItemLabel is what a command or file-change item was about to act on: the
+// command, or the paths it would have changed.
+func codexItemLabel(typ, command string, changes json.RawMessage) string {
+	if typ == "commandExecution" && command != "" {
+		return cutPreview(command)
+	}
+	var list []struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(changes, &list) == nil {
+		var paths []string
+		for _, c := range list {
+			if c.Path != "" {
+				paths = append(paths, c.Path)
+			}
+		}
+		if len(paths) > 0 {
+			return cutPreview(strings.Join(paths, ", "))
+		}
+	}
+	return typ
 }
 
 // codexTurnDone is a turn's end: the stop reason travels on a usage event on the

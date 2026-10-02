@@ -18,7 +18,9 @@
 //     every other runtime: item/completed for an agentMessage is a delta (phase
 //     final for the final answer, narration for commentary, block id the item
 //     id), for a commandExecution or fileChange a tool use (and, on the typed
-//     surface, a tool result), and turn/completed is a done (stop reason
+//     surface, a tool result, and a PermissionDenied for a declined one), for a
+//     refused item/tool/requestUserInput request a request_user_input tool use
+//     carrying the questions, and turn/completed is a done (stop reason
 //     end_turn, or cancelled when interrupted) or, for a failed turn, an error.
 //     A repeated item id is reported once. Prefer TypedEventCallback: EventFanout
 //     drops events when its channel is full (see StartOptions.EventFanout), and a
