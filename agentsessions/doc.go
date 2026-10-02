@@ -85,6 +85,18 @@
 // events.AuthFailed (EndTurnOnAuthFailure ends that turn early). Permission
 // denials parsed from the stream are marked on the byte Fanout.
 //
+// # Usage on the serve-http runtime
+//
+// OpenCode reports each step's tokens, cost and reason in a step-finish part.
+// The serve-http runtime sends one llmtypes.EventUsage on EventFanout per
+// step, as OpenCode's run mode does for its step_finish line: the tokens and
+// CostUSD are that step's own, never a running total, so a consumer sums them
+// per turn; output tokens include reasoning tokens; the stop reason is the
+// step's, normalized. A usage event is not terminal: a turn is one or more
+// steps, and session.idle still ends it. The compaction summary's step is
+// reported too, since it is real spend. EventFanout drops events when its
+// channel is full, usage included, so size it for the consumer.
+//
 // # A lost session on the streaming-stdio runtime
 //
 // A streaming-stdio child started to resume a provider session the provider
