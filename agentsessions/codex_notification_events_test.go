@@ -312,6 +312,12 @@ func TestCodexNotificationEvents(t *testing.T) {
 		add("command", "item/completed", `{"item":{"type":"commandExecution","id":"c1","command":"ls","status":"completed","aggregatedOutput":"a\n"}}`, w(s, ty, "c1"))
 		s, ty = tool("commandExecution", "c2", map[string]any{"command": "false"}, true, "")
 		add("failed command", "item/completed", `{"item":{"type":"commandExecution","id":"c2","command":"false","status":"failed"}}`, w(s, ty, "c2"))
+		s, ty = tool("commandExecution", "c3", map[string]any{"command": "rm -rf build"}, true, "")
+		ty = append(ty, pevents.PermissionDenied{Action: "commandExecution", DisplayName: "rm -rf build", ToolUseID: "c3"})
+		add("declined command is a refusal", "item/completed", `{"item":{"type":"commandExecution","id":"c3","command":"rm -rf build","status":"declined"}}`, w(s, ty, "c3"))
+		s, ty = tool("fileChange", "f2", map[string]any{"changes": []any{map[string]any{"path": "a.go"}, map[string]any{"path": "b.go"}}}, true, "")
+		ty = append(ty, pevents.PermissionDenied{Action: "fileChange", DisplayName: "a.go, b.go", ToolUseID: "f2"})
+		add("declined file change is a refusal", "item/completed", `{"item":{"type":"fileChange","id":"f2","status":"declined","changes":[{"path":"a.go"},{"path":"b.go"}]}}`, w(s, ty, "f2"))
 		s, ty = tool("fileChange", "f1", map[string]any{"changes": []any{map[string]any{"path": "a.go"}}}, false, "")
 		add("file change", "item/completed", `{"item":{"type":"fileChange","id":"f1","status":"completed","changes":[{"path":"a.go"}]}}`, w(s, ty, "f1"))
 
@@ -450,5 +456,226 @@ func TestJsonRpcStdioSession_CodexFullFanoutDropsEventsButTheCallbackDoesNot(t *
 	}
 	if first := <-c.fanout; first.Type != llmtypes.EventDelta {
 		t.Fatalf("the one event kept was %+v, want the first (the delta)", first)
+	}
+}
+
+// codexUserInput runs a session against a fake app-server that sends a
+// request_user_input request during a turn, answered by hook (nil refuses it),
+// and returns what the session reported on both surfaces.
+func codexUserInput(t *testing.T, hook func(string, json.RawMessage) (any, *JsonRpcError)) ([]llmtypes.StreamEvent, []pevents.Event) {
+	t.Helper()
+	const request = `{"jsonrpc":"2.0","id":9,"method":"item/tool/requestUserInput","params":{"threadId":"th","turnId":"t1","itemId":"i1","questions":[{"id":"q1","header":"DB","question":"Which database?"}]}}`
+	fake := providertest.New(t, runtimes.Codex, providertest.Script(
+		providertest.Recv(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`), providertest.Send(`{"jsonrpc":"2.0","id":1,"result":{}}`),
+		providertest.Recv(`{"jsonrpc":"2.0","id":2,"method":"thread/start"}`), providertest.Send(`{"jsonrpc":"2.0","id":2,"result":{}}`),
+		providertest.Recv(`{"jsonrpc":"2.0","id":3,"method":"turn/start"}`), providertest.Send(`{"jsonrpc":"2.0","id":3,"result":{}}`),
+		providertest.Stdout(request),
+		providertest.Recv(`{"jsonrpc":"2.0","id":9}`),
+		providertest.Stdout(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed"}}}`),
+		providertest.AwaitEOF(),
+	))
+	c := newCodexCollector()
+	adapter := provider.NewCodexAdapterAppServer()
+	adapter.Binary = fake.Path
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{ID: "codex-user-input", Adapter: adapter, Caps: Capabilities{JsonRpcStdio: true, BinaryRequired: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir: dir, LogPath: filepath.Join(dir, "session.log"),
+		EventFanout: c.fanout, TypedEventCallback: c.callback, JsonRpcRequestHook: hook,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()); _, _ = sess.Wait() })
+	caller := sess.(JsonRpcCaller)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, method := range []string{"initialize", "thread/start", "turn/start"} {
+		if _, err := caller.Call(ctx, method, map[string]any{}); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+	}
+	c.drain(t, true)
+	c.drain(t, false)
+	return c.events()
+}
+
+// Codex asks the user a question with a server request. A host that answers no one
+// refuses it, and the agent carries on; the session reports the question as a call
+// to the request_user_input tool, with the questions as its arguments and, on the
+// typed surface, a tool result that says it was refused. That is what lets a turn
+// reducer tell a question the turn ended on from one it resolved itself.
+func TestJsonRpcStdioSession_CodexRefusedUserInputIsReportedAsAQuestion(t *testing.T) {
+	stream, typed := codexUserInput(t, nil)
+	args := map[string]any{
+		"threadId": "th", "turnId": "t1", "itemId": "i1",
+		"questions": []any{map[string]any{"id": "q1", "header": "DB", "question": "Which database?"}},
+	}
+	endS, endT := endOfTurn(llmtypes.StopReasonEndTurn)
+	requireEvents(t, stream, typed,
+		[]llmtypes.StreamEvent{{Type: llmtypes.EventToolUse, ToolUse: &llmtypes.ToolUseBlock{ID: "9", Name: "request_user_input", Input: args}}, endS[0], endS[1]},
+		[]pevents.Event{pevents.ToolUse{ID: "9", Name: "request_user_input", Args: args}, pevents.ToolResult{ID: "9", IsError: true}, endT})
+}
+
+// A request a hook answers is a question that was answered: the tool result is not
+// an error.
+func TestJsonRpcStdioSession_CodexAnsweredUserInputIsNotARefusal(t *testing.T) {
+	_, typed := codexUserInput(t, func(string, json.RawMessage) (any, *JsonRpcError) {
+		return map[string]any{"answers": map[string]any{"q1": "Postgres"}}, nil
+	})
+	var result *pevents.ToolResult
+	for _, ev := range typed {
+		if r, ok := ev.(pevents.ToolResult); ok {
+			result = &r
+		}
+	}
+	if result == nil || result.ID != "9" || result.IsError {
+		t.Fatalf("typed = %+v, want a tool result for the question that is not an error", typed)
+	}
+}
+
+// A request that is not for user input is not a question: nothing is reported for
+// an approval request (its item is what is reported).
+func TestJsonRpcStdioSession_CodexApprovalRequestsAreNotQuestions(t *testing.T) {
+	fake := providertest.New(t, runtimes.Codex, providertest.Script(
+		providertest.Recv(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`), providertest.Send(`{"jsonrpc":"2.0","id":1,"result":{}}`),
+		providertest.Stdout(`{"jsonrpc":"2.0","id":4,"method":"item/commandExecution/requestApproval","params":{"kind":"command","itemId":"i1"}}`),
+		providertest.Recv(`{"jsonrpc":"2.0","id":4}`),
+		providertest.AwaitEOF(),
+	))
+	c := newCodexCollector()
+	sess := startCodexWithHook(t, fake, c, func(string, json.RawMessage) (any, *JsonRpcError) {
+		return map[string]any{"decision": "decline"}, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := sess.(JsonRpcCaller).Call(ctx, "initialize", map[string]any{}); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	c.drain(t, false)
+	stream, typed := c.events()
+	if len(stream) != 0 || len(typed) != 0 {
+		t.Fatalf("an approval request reported %+v / %+v, want nothing: its item is what is reported", stream, typed)
+	}
+}
+
+// startCodexWithHook is startCodex with a server-request hook.
+func startCodexWithHook(t *testing.T, fake *providertest.Fake, c *codexCollector, hook func(string, json.RawMessage) (any, *JsonRpcError)) Session {
+	t.Helper()
+	adapter := provider.NewCodexAdapterAppServer()
+	adapter.Binary = fake.Path
+	rt, err := NewFromAdapter(AdapterRuntimeConfig{ID: "codex-hook", Adapter: adapter, Caps: Capabilities{JsonRpcStdio: true, BinaryRequired: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	sess, err := rt.Start(context.Background(), StartOptions{
+		Workdir: dir, LogPath: filepath.Join(dir, "session.log"),
+		EventFanout: c.fanout, TypedEventCallback: c.callback, JsonRpcRequestHook: hook,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Stop(context.Background()); _, _ = sess.Wait() })
+	return sess
+}
+
+// The captured approval turn: Codex asked, the host accepted, the command ran and
+// failed on a read-only filesystem. That is a tool call that failed, not a refusal,
+// and no PermissionDenied is reported for it.
+func TestJsonRpcStdioSession_CodexAcceptedApprovalIsNotARefusal(t *testing.T) {
+	fake := providertest.New(t, runtimes.Codex, providertest.Replay("codex/app_server_tool_approval"))
+	c := newCodexCollector()
+	sess := startCodexWithHook(t, fake, c, func(string, json.RawMessage) (any, *JsonRpcError) {
+		return map[string]any{"decision": "accept"}, nil
+	})
+	caller := sess.(JsonRpcCaller)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, method := range []string{"initialize", "thread/start", "turn/start"} {
+		if _, err := caller.Call(ctx, method, map[string]any{"threadId": "x", "input": []any{}, "clientInfo": map[string]any{"name": "t", "version": "0"}}); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+	}
+	c.drain(t, true)
+	c.drain(t, false)
+	_, typed := c.events()
+
+	var uses, results, denials int
+	var final string
+	for _, ev := range typed {
+		switch e := ev.(type) {
+		case pevents.ToolUse:
+			uses++
+		case pevents.ToolResult:
+			results++
+			if !e.IsError {
+				t.Errorf("the failed command's result = %+v, want an error", e)
+			}
+		case pevents.PermissionDenied:
+			denials++
+		case pevents.Delta:
+			if e.Phase == "final" {
+				final = e.Text
+			}
+		}
+	}
+	if uses != 1 || results != 1 || denials != 0 {
+		t.Fatalf("typed = %+v, want one failed tool call and no refusal", typed)
+	}
+	if !strings.Contains(final, "read-only") {
+		t.Fatalf("final message = %q", final)
+	}
+}
+
+// Only Codex speaks request_user_input: another JSON-RPC runtime that sends a
+// request of that name gets no tool call reported.
+func TestJsonRpcStdioSession_OtherAdaptersGetNoCodexUserInputEvents(t *testing.T) {
+	// The notification after the request is how the test knows the request was
+	// handled: the reader answers the request, then routes the next frame.
+	fake := providertest.New(t, runtimes.Codex, providertest.Script(
+		providertest.Recv(`{"jsonrpc":"2.0","id":1,"method":"ping"}`),
+		providertest.Send(`{"jsonrpc":"2.0","id":1,"result":{}}`),
+		providertest.Stdout(`{"jsonrpc":"2.0","id":9,"method":"item/tool/requestUserInput","params":{"questions":[{"question":"Which?"}]}}`),
+		providertest.Recv(`{"jsonrpc":"2.0","id":9}`),
+		providertest.Stdout(`{"jsonrpc":"2.0","method":"after/request","params":{}}`),
+		providertest.AwaitEOF(),
+	))
+	fanout := make(chan llmtypes.StreamEvent, 8)
+	var typed []pevents.Event
+	var mu sync.Mutex
+	var n notes
+	sess := startJsonRpcFake(t, fake, StartOptions{
+		EventFanout:             fanout,
+		JsonRpcNotificationHook: n.hook,
+		TypedEventCallback: func(ev pevents.Event) {
+			mu.Lock()
+			typed = append(typed, ev)
+			mu.Unlock()
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := sess.(JsonRpcCaller).Call(ctx, "ping", map[string]any{}); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := n.has("after/request"); ok {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, ok := n.has("after/request"); !ok {
+		t.Fatal("the frame after the request was never routed")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(fanout) != 0 || len(typed) != 0 {
+		t.Fatalf("a non-Codex adapter's request produced %d stream / %+v typed events", len(fanout), typed)
 	}
 }

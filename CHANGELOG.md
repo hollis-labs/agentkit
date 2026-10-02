@@ -4,6 +4,55 @@ All notable changes to agentkit are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.24.0 — 2026-10-02
+
+A Codex app-server turn reports what it was refused and what it asked
+(CW-20261002-0073, ADR 0049). Takes go-providers v0.46.0.
+
+### Added
+
+- **A declined `commandExecution` or `fileChange` item is reported as a typed
+  `events.PermissionDenied`** (`Action` the item type, `DisplayName` the command or
+  the paths, `ToolUseID` the item id, which is also the id of the tool use reported
+  for it), after its `ToolUse` and `ToolResult`. A declined item is the posture
+  refusing the action Codex asked about, Codex's own record that it did not
+  happen; before, it was a tool call that merely did nothing. An item that
+  *failed* is not a refusal and is not reported as one: the captured
+  `app_server_tool_approval` turn, where the host accepted and the command then
+  failed on a read-only filesystem, reports a failed tool call and no denial.
+- **A refused `item/tool/requestUserInput` request is reported as a question.**
+  Codex asks the user a question with this server request; a host that answers no
+  one refuses it (`CodexApprovalResponder` returns a JSON-RPC error) and the agent
+  carries on. The session now reports it as a call to the `request_user_input`
+  tool, the request's params (the questions) as its arguments and the request id as
+  its id, on both surfaces, and on the typed surface a tool result that is an
+  error when the request was refused and not when a hook answered it. A consumer
+  can then tell a question the turn ended on from one the agent resolved itself.
+  Approval requests are not reported as questions; their item is what is reported.
+  Only the Codex adapter gets either.
+
+### Changed
+
+- **go-providers v0.43.0 → v0.46.0**, for `events.PermissionDenied.ToolUseID`
+  (v0.46.0), which also reports Claude's `result.permission_denials`.
+
+### Tests
+
+- The captured approval turn through a real session (accepted, then failed): one
+  failed tool call, no refusal. Declined command and file-change items, a refused
+  and an answered user-input request, an approval request that reports nothing,
+  and the non-Codex guard for requests. Each of the Codex-signal changes fails a
+  test if removed.
+
+### Not covered
+
+- **No capture contains a declined item or a `requestUserInput` request.** The
+  `declined` status and the request's params (`questions[].question`) are from
+  Codex's app-server protocol and `codex_approvals.go`, not from a recording; the
+  tests use the shapes the protocol documents.
+- Routing a Codex question or approval to a person instead of refusing it, and
+  reporting `mcpToolCall` items, are not done.
+
 ## v0.23.1 — 2026-10-02
 
 A subprocess-per-turn turn that ends without a terminal line now ends on the
